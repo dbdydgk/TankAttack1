@@ -1,31 +1,45 @@
-using Photon.Pun;
+ï»¿using Photon.Pun;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 public class CannonCtrl : MonoBehaviourPun, IPunObservable
 {
     private Transform tr;
     public float rotSpeed = 100.0f;
-    PhotonView pv = null; // Æ÷Åæºä ÄÄÆ÷³ÍÆ® º¯¼ö
-    Quaternion currRot = Quaternion.identity; //¿ø°İ ÅÊÅ© È¸Àü °ª
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    PhotonView pv = null; // í¬í†¤ë·° ì»´í¬ë„ŒíŠ¸ ë³€ìˆ˜
+    Quaternion currRot = Quaternion.identity; //ì›ê²© íƒ±í¬ íšŒì „ ê°’
+
+    [Header("í¬ì‹  ìƒí•˜ ê°ë„ ì œí•œ")]
+    public float minPitch = -25f;
+    public float maxPitch = 5f;
+
     void Awake()
     {
         tr = GetComponent<Transform>();
         pv = GetComponent<PhotonView>();
-        //µ¥ÀÌÅÍ Àü¼Û Å¸ÀÔ ¹× µ¿±âÈ­ ¼Ó¼º ¼³Á¤
+        //ë°ì´í„° ì „ì†¡ íƒ€ì… ë° ë™ê¸°í™” ì†ì„± ì„¤ì •
         pv.ObservedComponents[0] = this;
         pv.Synchronization = ViewSynchronization.UnreliableOnChange;
-        currRot = tr.localRotation; //ÃÊ±â È¸Àü°ª ¼³Á¤
+        currRot = tr.localRotation; //ì´ˆê¸° íšŒì „ê°’ ì„¤ì •
     }
     // Update is called once per frame
     void Update()
     {
         if (pv.IsMine)
         {
-            //¸¶¿ì½º ½ºÅ©·Ñ ÈÙ·Î Cannon °¢µµÁ¶Àı
+            //ë§ˆìš°ìŠ¤ ìŠ¤í¬ë¡¤ íœ ë¡œ Cannon ê°ë„ì¡°ì ˆ
             float angle = -Input.GetAxis("Mouse ScrollWheel") * Time.deltaTime *
                 rotSpeed;
-            tr.Rotate(angle, 0, 0);
+
+            Vector3 euler = tr.localEulerAngles;
+            float pitch = euler.x;
+            if (pitch > 180f) pitch -= 360f;
+
+            pitch += angle;
+            pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+
+            euler.x = pitch;
+            tr.localEulerAngles = euler;
         }
         else
         {

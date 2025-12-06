@@ -311,9 +311,19 @@ public class EnemyAI : MonoBehaviour
     {
         if (enemyData.bulletPrefab == null || firePoint == null) return;
 
-        // 플레이어가 쓰는 Cannon 프리팹 그대로 사용
-        // Cannon.cs에서 AddForce, 폭발, 파괴까지 처리함 :contentReference[oaicite:2]{index=2}
-        Instantiate(enemyData.bulletPrefab, firePoint.position, firePoint.rotation);
+        // 포탄 생성
+        GameObject bulletObj = Instantiate(
+            enemyData.bulletPrefab,
+            firePoint.position,
+            firePoint.rotation
+        );
+
+        // EnemyBullet에 데미지 전달
+        EnemyBullet b = bulletObj.GetComponent<EnemyBullet>();
+        if (b != null)
+        {
+            b.damage = enemyData.damage;   // EnemyData에 설정한 값 사용
+        }
     }
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================

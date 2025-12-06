@@ -1,34 +1,54 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Runtime.InteropServices.WindowsRuntime;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class TankDamage : MonoBehaviour
 {
-    public Canvas hudCanvas; //Canvas °´Ã¼
-    public Image hpBar; // Ã¼·Â¹Ù ÀÌ¹ÌÁö
-    //ÅÊÅ© ÆøÆÄ ÈÄ Åõ¸í Ã³¸®¸¦ À§ÇÑ MeshRenderer ÄÄÆ÷³ÍÆ® ¹è¿­
+    public Canvas hudCanvas; //Canvas ê°ì²´
+    public Image hpBar; // ì²´ë ¥ë°” ì´ë¯¸ì§€
+    //íƒ±í¬ í­íŒŒ í›„ íˆ¬ëª… ì²˜ë¦¬ë¥¼ ìœ„í•œ MeshRenderer ì»´í¬ë„ŒíŠ¸ ë°°ì—´
     MeshRenderer[] renderers;
-    GameObject expEffect = null; //ÅÊÅ© Æø¹ß È¿°ú
-    int initHp = 100; //ÅÊÅ© ÃÊ±â »ı¸íÄ¡
-    int currHp = 0; // ÇöÀç Ã¼·Â
+    GameObject expEffect = null; //íƒ±í¬ í­ë°œ íš¨ê³¼
+    [SerializeField]int initHp = 100; //íƒ±í¬ ì´ˆê¸° ìƒëª…ì¹˜
+    int currHp = 0; // í˜„ì¬ ì²´ë ¥
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
         renderers = GetComponentsInChildren<MeshRenderer>();
         currHp = initHp;
-        //ÅÊÅ© Æø¹ß ½Ã »ı¼º½ÃÅ³ Æø¹ßÈ¿°ú ·Îµå
+        //íƒ±í¬ í­ë°œ ì‹œ ìƒì„±ì‹œí‚¬ í­ë°œíš¨ê³¼ ë¡œë“œ
         expEffect = Resources.Load<GameObject>("Exploson10");
-        hpBar.color = Color.green; // Filled ÀÌ¹ÌÁö »ö»óÀ» ³ì»öÀ¸·Î..
+        hpBar.color = Color.green; // Filled ì´ë¯¸ì§€ ìƒ‰ìƒì„ ë…¹ìƒ‰ìœ¼ë¡œ..
     }
+    // EnemyBulletì—ì„œ ì§ì ‘ í˜¸ì¶œí•  ìˆ˜ ìˆë„ë¡ ê³µê°œ í•¨ìˆ˜ë¡œ ë¶„ë¦¬
+    public void TakeDamage(int amount)
+    {
+        if (currHp <= 0) return;
+
+        currHp -= amount;
+
+        hpBar.fillAmount = (float)currHp / (float)initHp;
+
+        if (hpBar.fillAmount <= 0.4f)
+            hpBar.color = Color.red;
+        else if (hpBar.fillAmount <= 0.6f)
+            hpBar.color = Color.yellow;
+
+        if (currHp <= 0)
+        {
+            StartCoroutine(ExplosionTank());
+        }
+    }
+    //pvpìš© í¬íƒ„ ë°ë¯¸ì§€ ì²˜ë¦¬
     private void OnTriggerEnter(Collider other)
     {
         if (currHp > 0 && other.tag == "CANNON")
         {
             currHp -= 20;
-            //ÇöÀç »ı¸íÄ¡ ¹éºĞÀ² °è»ê
+            //í˜„ì¬ ìƒëª…ì¹˜ ë°±ë¶„ìœ¨ ê³„ì‚°
             hpBar.fillAmount = (float)currHp / (float)initHp;
-            //40%ÀÌÇÏ´Â »¡°£»ö, 60% ÀÌÇÏ´Â ³ë¶õ»ö
+            //40%ì´í•˜ëŠ” ë¹¨ê°„ìƒ‰, 60% ì´í•˜ëŠ” ë…¸ë€ìƒ‰
             if(hpBar.fillAmount <= 0.4f) 
                 hpBar.color = Color.red;
             else if(hpBar.fillAmount <=0.6f)
@@ -42,17 +62,20 @@ public class TankDamage : MonoBehaviour
     }
     IEnumerator ExplosionTank()
     {
-        //Æø¹ßÈ¿°ú »ı¼º
+        //í­ë°œíš¨ê³¼ ìƒì„±
         GameObject effect = GameObject.Instantiate(expEffect,
             transform.position, Quaternion.identity);
-        Destroy(effect, 3.0f);//3ÃÊµÚ¿¡ ÆÄ±«
-        hudCanvas.enabled = false;//HUDÄµ¹ö½º ¾Èº¸ÀÌ°Ô
-        SetTankVisible(false); //ÅÊÅ© ¾Èº¸ÀÌ°Ô
+
+        Destroy(effect, 3.0f);//3ì´ˆë’¤ì— íŒŒê´´
+
+        hudCanvas.enabled = false;//HUDìº”ë²„ìŠ¤ ì•ˆë³´ì´ê²Œ
+        SetTankVisible(false); //íƒ±í¬ ì•ˆë³´ì´ê²Œ
         yield return new WaitForSeconds(3.0f);
-        //3ÃÊµÚ ÅÊÅ©ÀÇ Ã¼·ÂÀ» È¸º¹ÇÏ°í Ã¼·Â¹Ù °»½Å
+        //3ì´ˆë’¤ íƒ±í¬ì˜ ì²´ë ¥ì„ íšŒë³µí•˜ê³  ì²´ë ¥ë°” ê°±ì‹ 
+
         hpBar.fillAmount = 1.0f;
         hpBar.color = Color.green;
-        hudCanvas.enabled = true;//HUDÄµ¹ö½º ´Ù½Ã º¸ÀÌ°Ô
+        hudCanvas.enabled = true;//HUDìº”ë²„ìŠ¤ ë‹¤ì‹œ ë³´ì´ê²Œ
 
         currHp = initHp;
         SetTankVisible(true);
@@ -60,7 +83,7 @@ public class TankDamage : MonoBehaviour
     }
     void SetTankVisible(bool isVisible)
     {
-        //¸Ş½¬ ·»´õ·¯¸¦ È°¼º/ºñÈ°¼ºÈ­ ÇÏ´Â ÇÔ¼ö
+        //ë©”ì‰¬ ë Œë”ëŸ¬ë¥¼ í™œì„±/ë¹„í™œì„±í™” í•˜ëŠ” í•¨ìˆ˜
         foreach (MeshRenderer _renderer in renderers)
         {
             _renderer.enabled = isVisible;
