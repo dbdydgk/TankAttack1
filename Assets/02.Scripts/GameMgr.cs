@@ -54,7 +54,7 @@ public class GameMgr : MonoBehaviourPunCallbacks
     void CreateTank()
     {
         float pos = Random.Range(-100.0f, 100.0f);
-        PhotonNetwork.Instantiate("Tank",
+        PhotonNetwork.Instantiate("PlayerTank2",
             new Vector3(pos, 20.0f, pos), Quaternion.identity, 0);
     }
 }

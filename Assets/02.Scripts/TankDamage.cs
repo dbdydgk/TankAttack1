@@ -10,7 +10,7 @@ public class TankDamage : MonoBehaviour
     //탱크 폭파 후 투명 처리를 위한 MeshRenderer 컴포넌트 배열
     MeshRenderer[] renderers;
     GameObject expEffect = null; //탱크 폭발 효과
-    [SerializeField]int initHp = 100; //탱크 초기 생명치
+    public int initHp = 100; //탱크 초기 생명치
     int currHp = 0; // 현재 체력
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
