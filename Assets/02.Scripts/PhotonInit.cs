@@ -5,7 +5,10 @@ using UnityEngine.UI;
 using Photon.Pun;
 using Photon.Realtime;
 using UnityEditor;
-
+//커스텀 룸 속성을 다루기 위한 라이브러리
+//방의 모드를 Photon을 통해 네트워크로 보내 주고
+//다른 클라이언트에서도 똑같이 읽을 수 있도록 하기 위해 사용
+using Hashtable = ExitGames.Client.Photon.Hashtable;
 public class PhotonInit : MonoBehaviourPunCallbacks
 {
   
@@ -15,6 +18,7 @@ public class PhotonInit : MonoBehaviourPunCallbacks
     public GameObject roomItem; // 룸 목록만큼 생성될 프리팹
     public GameObject scrollContents;  //RoomItem이 차일드로 생성될 Parent 객체
 
+    public Toggle pvpModeToggle;    //방 만들 때 pvp 모드 선택 토글
     private Dictionary<string, GameObject> rooms = new Dictionary<string, GameObject>();
     private void Awake()
     {
@@ -92,11 +96,24 @@ public class PhotonInit : MonoBehaviourPunCallbacks
         PhotonNetwork.NickName = userId.text; //로컬 플레이어 이름 설정
         PlayerPrefs.SetString("USER_ID", userId.text);
 
+        bool isPvp = (pvpModeToggle != null && pvpModeToggle.isOn);
+
+        if (isPvp)
+            _roomName = "[PVP]" + _roomName;
+        else
+            _roomName = "[PVE]" + _roomName;
+
         RoomOptions roomOptions = new RoomOptions();
         roomOptions.IsOpen = true;
         roomOptions.IsVisible = true;
         roomOptions.MaxPlayers = 20;
 
+        //커스텀 룸 속성에 모드 정보 저장
+        Hashtable customProps = new Hashtable();
+        customProps["MODE"] = isPvp ? "PVP" : "PVE";
+        roomOptions.CustomRoomProperties = customProps;
+
+        roomOptions.CustomRoomPropertiesForLobby = new string[] { "MODE" };
         PhotonNetwork.CreateRoom(_roomName, roomOptions, TypedLobby.Default);
     }
     public override void OnCreateRoomFailed(short returnCode, string message) //방만들기 실패 했을 때 호출되는 콜백함수
