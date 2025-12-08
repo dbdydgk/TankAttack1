@@ -1,17 +1,20 @@
-using Photon.Pun;
+ï»¿using Photon.Pun;
 using Photon.Realtime;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class GameMgr : MonoBehaviourPunCallbacks
 {
-    public Text txtConnect; // Á¢¼Ó ÀÎ¿ø ¼ö Ç¥½Ã
-    public Text txtLogmsg; // Á¢¼ÓÀÚ ·Î±× Ç¥½Ã
+    public Text txtConnect; // ì ‘ì† ì¸ì› ìˆ˜ í‘œì‹œ
+    public Text txtLogmsg; // ì ‘ì†ì ë¡œê·¸ í‘œì‹œ
     PhotonView pv;
+
+    public string[] tanks = { "Tank", "HeavyTank" };
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
-        CreateTank(); //ÅÊÅ© »ı¼º
+        CreateTank(); //íƒ±í¬ ìƒì„±
         PhotonNetwork.IsMessageQueueRunning = true;
         pv = GetComponent<PhotonView>();
         GetConnectPlayerCount();
@@ -21,23 +24,25 @@ public class GameMgr : MonoBehaviourPunCallbacks
         string msg = "\n<color=#00ff00>["
             + PhotonNetwork.NickName+"] Connected</color>";
         pv.RPC("LogMsg", RpcTarget.AllBuffered, msg);
+
+        
     }
     [PunRPC]
     void LogMsg(string msg)
     {
         txtLogmsg.text = txtLogmsg.text+msg;
     }
-    void GetConnectPlayerCount() //·ë Á¢¼ÓÀÚ ¼ö Ç¥½Ã ÇÔ¼ö
+    void GetConnectPlayerCount() //ë£¸ ì ‘ì†ì ìˆ˜ í‘œì‹œ í•¨ìˆ˜
     {
         Room currRoom = PhotonNetwork.CurrentRoom;
         txtConnect.text = currRoom.PlayerCount.ToString()+
             "/"+currRoom.MaxPlayers.ToString();
     }
-    public override void OnPlayerEnteredRoom(Player newPlayer) //»õ·Î¿î ÇÃ·¹ÀÌ¾î°¡ ·ë¿¡ Á¢¼ÓÇßÀ» ¶§
+    public override void OnPlayerEnteredRoom(Player newPlayer) //ìƒˆë¡œìš´ í”Œë ˆì´ì–´ê°€ ë£¸ì— ì ‘ì†í–ˆì„ ë•Œ
     {
         GetConnectPlayerCount();
     }
-    public override void OnPlayerLeftRoom(Player otherPlayer) //ÇÃ·¹ÀÌ¾î°¡ ·ë¿¡¼­ ³ª°¬À» ¶§
+    public override void OnPlayerLeftRoom(Player otherPlayer) //í”Œë ˆì´ì–´ê°€ ë£¸ì—ì„œ ë‚˜ê°”ì„ ë•Œ
     {
         GetConnectPlayerCount();
     }
@@ -45,16 +50,16 @@ public class GameMgr : MonoBehaviourPunCallbacks
     {
         string msg = "\n<color=#ff0000>[" + PhotonNetwork.NickName + "] Disconnected</color>";
         pv.RPC("LogMsg", RpcTarget.AllBuffered, msg);
-        PhotonNetwork.LeaveRoom(); //·ë ³ª°¡±â
+        PhotonNetwork.LeaveRoom(); //ë£¸ ë‚˜ê°€ê¸°
     }
-    public override void OnLeftRoom() //·ë ³ª°¡±â°¡ ¿Ï·áµÇ¾úÀ» ¶§
+    public override void OnLeftRoom() //ë£¸ ë‚˜ê°€ê¸°ê°€ ì™„ë£Œë˜ì—ˆì„ ë•Œ
     {
-        PhotonNetwork.LoadLevel("scLobby"); //·Îºñ ¾ÀÀ¸·Î ÀÌµ¿
+        PhotonNetwork.LoadLevel("scLobby"); //ë¡œë¹„ ì”¬ìœ¼ë¡œ ì´ë™
     }
     void CreateTank()
     {
         float pos = Random.Range(-100.0f, 100.0f);
-        PhotonNetwork.Instantiate("PlayerTank2",
+        PhotonNetwork.Instantiate(tanks[PlayerInfo.SelectedTankIndex],
             new Vector3(pos, 20.0f, pos), Quaternion.identity, 0);
     }
 }
