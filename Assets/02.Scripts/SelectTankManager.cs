@@ -1,26 +1,32 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.UI;
 
 public class SelectTankManager : MonoBehaviour
 {
-    [Header("ÅÊÅ© ÇÁ¸®ºä °ü·Ã")]
-    public Transform previewSpawnPoint;   // ·Îºñ¿¡ ÅÊÅ©°¡ ¼­ ÀÖÀ» À§Ä¡
-    public GameObject[] tankPrefabs;      // PlayerTank, PlayerTank2 µî (ÇÁ¸®ÆÕ ¹è¿­)
+    [Header("íƒ±í¬ í”„ë¦¬ë·° ê´€ë ¨")]
+    public Transform previewSpawnPoint;   // ë¡œë¹„ì— íƒ±í¬ê°€ ì„œ ìˆì„ ìœ„ì¹˜
+    public GameObject[] tankPrefabs;      // PlayerTank, PlayerTank2 ë“± (í”„ë¦¬íŒ¹ ë°°ì—´)
 
-    [Header("UI ÆĞ³Î")]
-    public GameObject selectPanel;        // ÅÊÅ© ¼±ÅÃ ÆĞ³Î (Ã³À½¿¡´Â ºñÈ°¼ºÈ­)
+    [Header("UI íŒ¨ë„")]
+    public GameObject selectPanel;        // íƒ±í¬ ì„ íƒ íŒ¨ë„ (ì²˜ìŒì—ëŠ” ë¹„í™œì„±í™”)
 
 
-    [Header("UI ÅØ½ºÆ®")]
+    [Header("UI í…ìŠ¤íŠ¸")]
     public Text tankNameTxt;
     public Text tankSpecTxt;
 
     GameObject currentPreview;
     int currentIndex;
 
+    private int tankPreviewLayer;
+
+    private void Awake()
+    {
+        tankPreviewLayer = LayerMask.NameToLayer("TankPreview");
+    }
     void Start()
     {
-        // ÀúÀåµÈ °ªÀÌ ÀÖÀ¸¸é ºÒ·¯¿À°í, ¾øÀ¸¸é 0
+        // ì €ì¥ëœ ê°’ì´ ìˆìœ¼ë©´ ë¶ˆëŸ¬ì˜¤ê³ , ì—†ìœ¼ë©´ 0
         currentIndex = PlayerPrefs.GetInt("SelectedTankIndex", 0);
         PlayerInfo.SelectedTankIndex = currentIndex;
 
@@ -28,21 +34,21 @@ public class SelectTankManager : MonoBehaviour
         selectPanel.SetActive(false);
     }
 
-    // ====== UI ¹öÆ°¿¡¼­ È£ÃâÇÒ ÇÔ¼öµé ======
+    // ====== UI ë²„íŠ¼ì—ì„œ í˜¸ì¶œí•  í•¨ìˆ˜ë“¤ ======
 
-    // Select Tank ¹öÆ°¿¡ ¿¬°á
+    // Select Tank ë²„íŠ¼ì— ì—°ê²°
     public void OpenSelectPanel()
     {
         selectPanel.SetActive(true);
     }
 
-    // ÆĞ³Î ´İ±â(Ãë¼Ò ¹öÆ° µî)
+    // íŒ¨ë„ ë‹«ê¸°(ì·¨ì†Œ ë²„íŠ¼ ë“±)
     public void CloseSelectPanel()
     {
         selectPanel.SetActive(false);
     }
 
-    // ´ÙÀ½ ÅÊÅ© ¹öÆ° ¡æ
+    // ë‹¤ìŒ íƒ±í¬ ë²„íŠ¼ â†’
     public void NextTank()
     {
         currentIndex++;
@@ -52,7 +58,7 @@ public class SelectTankManager : MonoBehaviour
         SpawnPreviewTank();
     }
 
-    // ÀÌÀü ÅÊÅ© ¹öÆ° ¡ç
+    // ì´ì „ íƒ±í¬ ë²„íŠ¼ â†
     public void PrevTank()
     {
         currentIndex--;
@@ -62,7 +68,7 @@ public class SelectTankManager : MonoBehaviour
         SpawnPreviewTank();
     }
 
-    // ¼±ÅÃ È®Á¤ ¹öÆ° OK
+    // ì„ íƒ í™•ì • ë²„íŠ¼ OK
     public void ConfirmSelect()
     {
         PlayerInfo.SelectedTankIndex = currentIndex;
@@ -72,35 +78,66 @@ public class SelectTankManager : MonoBehaviour
         selectPanel.SetActive(false);
     }
 
-    // ====== ³»ºÎ¿¡¼­¸¸ »ç¿ëÇÏ´Â ÇÔ¼ö ======
+    // ====== ë‚´ë¶€ì—ì„œë§Œ ì‚¬ìš©í•˜ëŠ” í•¨ìˆ˜ ======
 
     void SpawnPreviewTank()
     {
-        // ±âÁ¸ ÇÁ¸®ºä »èÁ¦
+        // ê¸°ì¡´ í”„ë¦¬ë·° ì‚­ì œ
         if (currentPreview != null)
             Destroy(currentPreview);
 
-        // »õ ÅÊÅ© »ı¼º
+        // ìƒˆ íƒ±í¬ ìƒì„±
         GameObject prefab = tankPrefabs[currentIndex];
         currentPreview = Instantiate(prefab,
                                      previewSpawnPoint.position,
                                      previewSpawnPoint.rotation);
 
-        // ±ò²ûÇÏ°Ô Á¤¸®ÇÏ°í ½ÍÀ¸¸é ºÎ¸ğ·Î ºÙÀÌ±â
+        // ê¹”ë”í•˜ê²Œ ì •ë¦¬í•˜ê³  ì‹¶ìœ¼ë©´ ë¶€ëª¨ë¡œ ë¶™ì´ê¸°
         currentPreview.transform.SetParent(previewSpawnPoint, true);
 
+        //ìƒì„±ëœ ë¯¸ë¦¬ë³´ê¸° íƒ±í¬ì˜ ë ˆì´ì–´ë¥¼ TankPreviewë¡œ ë³€ê²½
+        SetLayerRecursively(currentPreview, tankPreviewLayer);
+
+        //ìƒì„±ëœ ë¯¸ë¦¬ë³´ê¸° íƒ±í¬ì˜ ì²´ë ¥ë°”ë¥¼ ìˆ¨ê¸°ê¸°
+        HidePreviewHpBar();
+        //íƒ±í¬ ì •ë³´ë¥¼ ê°€ì ¸ì™€ í…ìŠ¤íŠ¸ë¡œ ì¶œë ¥
         UpdateTankInfoUI();
+    }
+    void SetLayerRecursively(GameObject obj, int layer)
+    {
+        obj.layer = layer;
+
+        //ìì‹ ì˜¤ë¸Œì íŠ¸ë“¤ë„ ëª¨ë‘ ë ˆì´ì–´ ì„¤ì •
+        foreach (Transform child in obj.transform)
+        {
+            SetLayerRecursively(child.gameObject, layer);
+        }
+    }
+    void HidePreviewHpBar()
+    {
+        if (currentPreview == null) return;
+
+        // íƒ±í¬ ìœ„ì— ë–  ìˆëŠ” HPë°”ëŠ” ë³´í†µ World Space Canvasë¼ì„œ,
+        // ê·¸ ìº”ë²„ìŠ¤ë§Œ ì°¾ì•„ì„œ êº¼ì¤€ë‹¤.
+        var canvases = currentPreview.GetComponentsInChildren<Canvas>(true);
+        foreach (var c in canvases)
+        {
+            if (c.renderMode == RenderMode.WorldSpace)
+            {
+                c.gameObject.SetActive(false);
+            }
+        }
     }
     void UpdateTankInfoUI()
     {
         if (currentPreview == null) return;
 
-        // 1) ÅÊÅ© ÀÌ¸§ (¿øÇÏ¸é ÇÁ¸®ÆÕ ÀÌ¸§À» ±×´ë·Î »ç¿ëÇÏ°Å³ª Á÷Á¢ ¹è¿­·Î °ü¸®)
+        // 1) íƒ±í¬ ì´ë¦„ (ì›í•˜ë©´ í”„ë¦¬íŒ¹ ì´ë¦„ì„ ê·¸ëŒ€ë¡œ ì‚¬ìš©í•˜ê±°ë‚˜ ì§ì ‘ ë°°ì—´ë¡œ ê´€ë¦¬)
         string tankName = currentPreview.name.Replace("(Clone)", "");
         if (tankNameTxt != null)
             tankNameTxt.text = tankName;
 
-        // 2) °¢ ÄÄÆ÷³ÍÆ®¿¡¼­ ½ºÅÈ °¡Á®¿À±â
+        // 2) ê° ì»´í¬ë„ŒíŠ¸ì—ì„œ ìŠ¤íƒ¯ ê°€ì ¸ì˜¤ê¸°
         int hp = 0;
         float damage = 0f;
         float moveSpeed = 0f;
@@ -112,18 +149,18 @@ public class SelectTankManager : MonoBehaviour
         FireCannon fc = currentPreview.GetComponent<FireCannon>();
         if (fc != null)
         {
-            damage = fc.cannonDamage;      // ¾Æ±î Ãß°¡ÇØµĞ Æ÷Åº µ¥¹ÌÁö º¯¼ö
+            damage = fc.cannonDamage;      // ì•„ê¹Œ ì¶”ê°€í•´ë‘” í¬íƒ„ ë°ë¯¸ì§€ ë³€ìˆ˜
             fireInterval = fc.fireInterval;
         }
 
         TankMove tm = currentPreview.GetComponent<TankMove>();
         if (tm != null) moveSpeed = tm.moveSpeed;
 
-        // 3) º¸±â ÁÁ°Ô ¹®ÀÚ¿­·Î ±¸¼º
+        // 3) ë³´ê¸° ì¢‹ê²Œ ë¬¸ìì—´ë¡œ êµ¬ì„±
         if (tankSpecTxt != null)
         {
             string fireRateStr = fireInterval > 0f
-                ? (1f / fireInterval).ToString("0.0")   // ÃÊ´ç ¹ß»ç ¼ö
+                ? (1f / fireInterval).ToString("0.0")   // ì´ˆë‹¹ ë°œì‚¬ ìˆ˜
                 : "-";
 
             tankSpecTxt.text =
