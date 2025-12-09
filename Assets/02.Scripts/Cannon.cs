@@ -6,6 +6,7 @@ public class Cannon : MonoBehaviour
     public GameObject expEffect; //Æø¹ß È¿°ú ÇÁ¸®ÆÕ
     private CapsuleCollider _collider;
     private Rigidbody _ridbody;
+    public int damage = 20; //Æ÷ÅºÀÇ µ¥¹ÌÁö
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {

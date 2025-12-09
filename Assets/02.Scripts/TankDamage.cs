@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using Photon.Pun;
+using System.Collections;
 using System.Runtime.InteropServices.WindowsRuntime;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,6 +13,9 @@ public class TankDamage : MonoBehaviour
     GameObject expEffect = null; //탱크 폭발 효과
     public int initHp = 100; //탱크 초기 생명치
     int currHp = 0; // 현재 체력
+
+    bool isDead = false;    //적 탱크 죽었는지 여부
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
@@ -24,7 +28,8 @@ public class TankDamage : MonoBehaviour
     // EnemyBullet에서 직접 호출할 수 있도록 공개 함수로 분리
     public void TakeDamage(int amount)
     {
-        if (currHp <= 0) return;
+        
+        if (currHp <= 0 || isDead) return;
 
         currHp -= amount;
 
@@ -35,17 +40,26 @@ public class TankDamage : MonoBehaviour
         else if (hpBar.fillAmount <= 0.6f)
             hpBar.color = Color.yellow;
 
-        if (currHp <= 0)
+        if (currHp <= 0 && !isDead)
         {
+            isDead = true;
             StartCoroutine(ExplosionTank());
         }
     }
     //pvp용 포탄 데미지 처리
     private void OnTriggerEnter(Collider other)
     {
+        if (currHp <= 0) return;
+
         if (currHp > 0 && other.tag == "CANNON")
         {
-            currHp -= 20;
+            int damage = 20;
+            Cannon cn = other.GetComponent<Cannon>();
+            if(cn != null)
+            {
+                damage = cn.damage;
+            }
+            TakeDamage(damage);
             //현재 생명치 백분율 계산
             hpBar.fillAmount = (float)currHp / (float)initHp;
             //40%이하는 빨간색, 60% 이하는 노란색
@@ -70,23 +84,62 @@ public class TankDamage : MonoBehaviour
 
         hudCanvas.enabled = false;//HUD캔버스 안보이게
         SetTankVisible(false); //탱크 안보이게
-        yield return new WaitForSeconds(3.0f);
-        //3초뒤 탱크의 체력을 회복하고 체력바 갱신
+        // 이 오브젝트가 "Enemy" 태그면 = 적 탱크 → 그냥 파괴하고 끝
+        if (CompareTag("Enemy"))
+        {
+            // 네트워크 오브젝트면 PhotonNetwork.Destroy 사용
+            PhotonView pv = GetComponent<PhotonView>();
+            if (pv != null && PhotonNetwork.IsConnected && pv.IsMine)
+            {
+                PhotonNetwork.Destroy(gameObject);
+            }
+            else
+            {
+                Destroy(gameObject);
+            }
 
-        hpBar.fillAmount = 1.0f;
-        hpBar.color = Color.green;
-        hudCanvas.enabled = true;//HUD캔버스 다시 보이게
+            yield break;
+        }
 
+        float respawnDelay = GetRespawnDelay();
+        yield return new WaitForSeconds(respawnDelay);
+
+        // 체력/HP바/메쉬 복구 → 부활
         currHp = initHp;
-        SetTankVisible(true);
 
+        if (hpBar != null)
+        {
+            hpBar.fillAmount = 1.0f;
+            hpBar.color = Color.green;
+        }
+
+        if (hudCanvas != null)
+            hudCanvas.enabled = true;
+
+        SetTankVisible(true);
     }
     void SetTankVisible(bool isVisible)
     {
         //메쉬 렌더러를 활성/비활성화 하는 함수
+        if (renderers == null) return;
+
         foreach (MeshRenderer _renderer in renderers)
         {
             _renderer.enabled = isVisible;
+        }
+    }
+    float GetRespawnDelay()
+    {
+        GameMgr gm = FindObjectOfType<GameMgr>();
+        if (gm != null && gm.isPvpMode)
+        {
+            // PVP 모드
+            return 3.0f;
+        }
+        else
+        {
+            // PVE 모드 (또는 GameMgr 못 찾았을 때 기본값)
+            return 10.0f;
         }
     }
     // Update is called once per frame

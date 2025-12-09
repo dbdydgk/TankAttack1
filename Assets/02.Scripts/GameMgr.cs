@@ -30,6 +30,9 @@ public class GameMgr : MonoBehaviourPunCallbacks
     public int baseEnemyCount = 2;           // Wave 1, 플레이어 1명 기준 적 수
     public int enemyIncreasePerWave = 1;     // 웨이브마다 플레이어 1명 기준으로 이만큼씩 증가
 
+    [Header("적 태그(PVE 적 생존 여부 체크용")]
+    public string enemyTag = "Enemy";
+
     public bool isPvpMode = false;  //현재 방의 모드(PVP인지 아닌지)
 
     int currentWave = 0;
@@ -80,7 +83,8 @@ public class GameMgr : MonoBehaviourPunCallbacks
 
             SpawnWave(currentWave);
 
-            // 지금은 단순 시간 기반. 나중에 "모든 적 죽으면 다음 웨이브"로 바꿀 수 있음.
+            yield return new UnityEngine.WaitUntil(() => !AreEnemiesAlive());
+
             yield return new WaitForSeconds(timeBetweenWaves);
         }
 
@@ -140,6 +144,11 @@ public class GameMgr : MonoBehaviourPunCallbacks
 
         // 3) 적 탱크 네트워크 생성 (마스터 클라이언트만 호출해야 함)
         PhotonNetwork.Instantiate(enemyName, spawnPos, Quaternion.identity, 0);
+    }
+    bool AreEnemiesAlive()
+    {
+        var enemies = GameObject.FindGameObjectsWithTag(enemyTag);
+        return enemies != null && enemies.Length > 0;
     }
     // =========================
     //  기존 UI / 룸 관련 코드
