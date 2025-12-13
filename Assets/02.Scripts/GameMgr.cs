@@ -63,15 +63,6 @@ public class GameMgr : MonoBehaviourPunCallbacks
             {
                 isPvpMode = (modeStr == "PVP");
             }
-            //만약 PVP모드가 아니면 PVP 랜덤 스폰 영역 콜리더 비활성화
-            //AI 적 탱크의 포탑 프리팹이 스폰영역 콜리더와 충돌하는 문제를 해결하기 위함
-            if (!isPvpMode)
-            {
-                foreach(BoxCollider pvpSpawnArea in pvpSpawnAreas)
-                {
-                    pvpSpawnArea.enabled = false;
-                }
-            }
 
         }
 

@@ -29,6 +29,9 @@ public class EnemyBullet : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
+        //적 포탄이 생성되자마자 스폰영역 콜리더에 충돌하는 문제를 해결
+        if (other.CompareTag("SpawnArea")) return;
+
         TankDamage td = other.GetComponentInParent<TankDamage>();
 
         if (td != null)

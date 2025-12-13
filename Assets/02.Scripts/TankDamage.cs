@@ -147,4 +147,20 @@ public class TankDamage : MonoBehaviour
     {
         
     }
+    public void Heal(int amount)
+    {
+        if (amount <= 0) return;
+        if (currHp <= 0) return;
+
+        currHp = Mathf.Clamp(currHp + amount, 0, initHp);
+
+        if (hpBar != null)
+        {
+            hpBar.fillAmount = (float)currHp / (float)initHp;
+
+            if (hpBar.fillAmount <= 0.4f) hpBar.color = Color.red;
+            else if (hpBar.fillAmount <= 0.6f) hpBar.color = Color.yellow;
+            else hpBar.color = Color.green;
+        }
+    }
 }
