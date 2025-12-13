@@ -1,35 +1,36 @@
-using System.Collections;
+ï»¿using System.Collections;
 using UnityEngine;
 
 public class Cannon : MonoBehaviour
 {
-    public GameObject expEffect; //Æø¹ß È¿°ú ÇÁ¸®ÆÕ
+    public GameObject expEffect; //í­ë°œ íš¨ê³¼ í”„ë¦¬íŒ¹
     private CapsuleCollider _collider;
     private Rigidbody _ridbody;
-    public int damage = 20; //Æ÷ÅºÀÇ µ¥¹ÌÁö
+    public int damage = 20; //í¬íƒ„ì˜ ë°ë¯¸ì§€
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
         _collider = GetComponent<CapsuleCollider>();
         _ridbody = GetComponent<Rigidbody>();
         GetComponent<Rigidbody>().AddForce(transform.forward * 6000.0f);
-        //Æ÷ÅºÀÌ ¹ß»çµÈ ÈÄ 3ÃÊ°¡ Áö³ª¸é Æø¹ß ÀÌÆåÆ® ÈÄ ÆÄ±«
+        //í¬íƒ„ì´ ë°œì‚¬ëœ í›„ 3ì´ˆê°€ ì§€ë‚˜ë©´ í­ë°œ ì´í™íŠ¸ í›„ íŒŒê´´
         StartCoroutine(this.ExplosionCannon(3.0f));
     }
     private void OnTriggerEnter(Collider other)
     {
-        //´ë»óÀÌ ´©±¸µç ºÎµúÈ÷¸é ÆÄ±«
+        if (other.CompareTag("SpawnArea")) return;
+        //ëŒ€ìƒì´ ëˆ„êµ¬ë“  ë¶€ë”ªíˆë©´ íŒŒê´´
         StartCoroutine(this.ExplosionCannon(0.0f));
     }
     IEnumerator ExplosionCannon(float tm)
     {
         yield return new WaitForSeconds(tm);
-        _collider.enabled = false; // ´õÀÌ»ó Ãæµ¹ÀÌ ¾ÈµÇ°Ô Äİ¶óÀÌ´õ ºñÈ°¼ºÈ­  
+        _collider.enabled = false; // ë”ì´ìƒ ì¶©ëŒì´ ì•ˆë˜ê²Œ ì½œë¼ì´ë” ë¹„í™œì„±í™”  
         _ridbody.isKinematic = true;
-        //Æø¹ß È¿°ú »ı¼º
+        //í­ë°œ íš¨ê³¼ ìƒì„±
         GameObject obj = (GameObject)Instantiate(expEffect,transform.position,
             Quaternion.identity);
-        Destroy(obj, 1.0f); //Æø¹ßÈ¿°ú ÆÄ±«
-        Destroy(this.gameObject, 1.0f); //Æ÷Åº ÆÄ±«
+        Destroy(obj, 1.0f); //í­ë°œíš¨ê³¼ íŒŒê´´
+        Destroy(this.gameObject, 1.0f); //í¬íƒ„ íŒŒê´´
     }
 }

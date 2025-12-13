@@ -33,6 +33,20 @@ public class GameMgr : MonoBehaviourPunCallbacks
     [Header("적 태그(PVE 적 생존 여부 체크용")]
     public string enemyTag = "Enemy";
 
+    [Header("PVP 랜덤 스폰 영역(BoxCollider Trigger")]
+    public BoxCollider[] pvpSpawnAreas;
+
+    [Header("PVP 스폰 검사 레이어")]
+    public LayerMask groundLayer;    //도로/바닥 MeshCollider 레이어
+    public LayerMask blockLayer;    //건물/병/장애물 레이어
+
+    [Header("PVP 스폰 검사 옵션")]
+    public float spawnCheckRadius = 2.5f;        // 탱크 크기에 맞게
+    public float minDistanceFromPlayers = 8f;    // 겹스폰 방지 거리
+    public int spawnTryCount = 30;               // 랜덤 재시도 횟수
+    public float raycastHeight = 200f;           // 위에서 아래로 Raycast 시작 높이
+    public float groundOffsetY = 0.5f;           // 바닥에 살짝 띄우기
+
     public bool isPvpMode = false;  //현재 방의 모드(PVP인지 아닌지)
 
     int currentWave = 0;
@@ -49,6 +63,16 @@ public class GameMgr : MonoBehaviourPunCallbacks
             {
                 isPvpMode = (modeStr == "PVP");
             }
+            //만약 PVP모드가 아니면 PVP 랜덤 스폰 영역 콜리더 비활성화
+            //AI 적 탱크의 포탑 프리팹이 스폰영역 콜리더와 충돌하는 문제를 해결하기 위함
+            if (!isPvpMode)
+            {
+                foreach(BoxCollider pvpSpawnArea in pvpSpawnAreas)
+                {
+                    pvpSpawnArea.enabled = false;
+                }
+            }
+
         }
 
         CreateTank(); //탱크 생성
@@ -150,6 +174,13 @@ public class GameMgr : MonoBehaviourPunCallbacks
         var enemies = GameObject.FindGameObjectsWithTag(enemyTag);
         return enemies != null && enemies.Length > 0;
     }
+    [PunRPC]
+    void RpcSetWave(int wave, int max)
+    {
+        currentWave = wave;
+        if (txtWave != null)
+            txtWave.text = $"Wave {wave}/{max}";
+    }
     // =========================
     //  기존 UI / 룸 관련 코드
     // =========================
@@ -192,36 +223,89 @@ public class GameMgr : MonoBehaviourPunCallbacks
         if (isPvpMode)
         {
             // PVP 모드: 기존처럼 맵 안 랜덤 스폰
-            float pos = Random.Range(-100.0f, 100.0f);
-            spawnPos = new Vector3(pos, 20.0f, pos);
+            //float pos = Random.Range(-100.0f, 100.0f);
+            //spawnPos = new Vector3(pos, 20.0f, pos);
+
+            // PVP: 랜덤 스폰 (SpawnArea 내부 + 도로 위 + 장애물/겹스폰 방지)
+            spawnPos = GetRandomPvpSpawnPos();
         }
         else
         {
             // PVE 모드: 플레이어 스폰 포인트에서 스폰
-            if (playerSpawnPoints != null && playerSpawnPoints.Length > 0)
+            // ★ PVE는 스폰포인트 필수로 강제
+            if (playerSpawnPoints == null || playerSpawnPoints.Length == 0 || playerSpawnPoints[0] == null)
             {
-                // 플레이어마다 고정된 위치를 주고 싶으면 ActorNumber 기반으로 인덱스 결정
-                int index = 0;
-                if (PhotonNetwork.LocalPlayer != null)
-                {
-                    index = (PhotonNetwork.LocalPlayer.ActorNumber - 1) % playerSpawnPoints.Length;
-                }
+                Debug.LogError("[CreateTank] PVE인데 PlayerSpawnPoints가 " +
+                    "비어있거나 Missing입니다. 랜덤 스폰 금지.");
+                return;
+            }
 
-                spawnPos = playerSpawnPoints[index].position;
-            }
-            else
-            {
-                // 스폰 포인트를 아직 안 넣었다면, 임시로 랜덤 스폰 (디버그용)
-                float pos = Random.Range(-100.0f, 100.0f);
-                spawnPos = new Vector3(pos, 20.0f, pos);
-                Debug.LogWarning("[PVE] playerSpawnPoints가 비어 있어 임시 랜덤 위치에서 플레이어를 스폰합니다.");
-            }
+            int idx = (PhotonNetwork.LocalPlayer.ActorNumber - 1) 
+                % playerSpawnPoints.Length;
+            spawnPos = playerSpawnPoints[idx].position;
+            Debug.Log($"[CreateTank] PVE SpawnPoint idx={idx}, " +
+                $"name={playerSpawnPoints[idx].name}, pos={spawnPos}");
         }
 
-        PhotonNetwork.Instantiate(
-            tanks[PlayerInfo.SelectedTankIndex],
-            spawnPos,
-            Quaternion.identity,
-            0);
+        int tankIndex = Mathf.Clamp(PlayerInfo.SelectedTankIndex, 0, tanks.Length - 1);
+        var go = PhotonNetwork.Instantiate(tanks[tankIndex], spawnPos, Quaternion.identity, 0);
+
+        Debug.Log($"[CreateTank] Spawned={go.name}, finalPos={go.transform.position}");
+    }
+    Vector3 GetRandomPvpSpawnPos()
+    {
+        // SpawnArea 미설정 시 fallback (디버그용)
+        if (pvpSpawnAreas == null || pvpSpawnAreas.Length == 0 || pvpSpawnAreas[0] == null)
+        {
+            Debug.LogWarning("[PVP Spawn] pvpSpawnAreas 비어있음 → fallback 랜덤");
+            float pos = Random.Range(-100f, 100f);
+            return new Vector3(pos, 20f, pos);
+        }
+
+        for (int t = 0; t < spawnTryCount; t++)
+        {
+            BoxCollider area = pvpSpawnAreas[Random.Range(0, pvpSpawnAreas.Length)];
+            if (area == null) continue;
+
+            Bounds b = area.bounds;
+
+            float x = Random.Range(b.min.x, b.max.x);
+            float z = Random.Range(b.min.z, b.max.z);
+
+            // Ground(도로 MeshCollider) 위에 붙이기
+            Vector3 rayOrigin = new Vector3(x, b.max.y + raycastHeight, z);
+            if (!Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, raycastHeight * 2f, groundLayer))
+                continue;
+
+            Vector3 p = hit.point;
+            p.y += groundOffsetY;
+
+            // 장애물/벽 겹침 방지
+            if (Physics.CheckSphere(p, spawnCheckRadius, blockLayer))
+                continue;
+
+            // 다른 플레이어와 너무 가까우면 스폰 금지
+            GameObject[] players = GameObject.FindGameObjectsWithTag("Player");
+            bool tooClose = false;
+            foreach (GameObject pl in players)
+            {
+                if (pl == null) continue;
+                if (Vector3.Distance(pl.transform.position, p) < minDistanceFromPlayers)
+                {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (tooClose) continue;
+
+            Debug.Log($"[PVP Spawn] success try={t}, pos={p}");
+            return p;
+        }
+
+        // 전부 실패 시: 첫 영역 중앙 fallback
+        Vector3 c = pvpSpawnAreas[0].bounds.center;
+        Vector3 fallback = new Vector3(c.x, c.y + 5f, c.z);
+        Debug.LogWarning($"[PVP Spawn] failed all tries → fallback={fallback}");
+        return fallback;
     }
 }
