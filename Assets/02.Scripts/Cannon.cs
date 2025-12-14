@@ -18,7 +18,11 @@ public class Cannon : MonoBehaviour
     }
     private void OnTriggerEnter(Collider other)
     {
+        //플레이어 스폰 영역, 적의 탐지영역, 아이템 콜리더는 제외
         if (other.CompareTag("SpawnArea")) return;
+        if (other.CompareTag("EnemySensor")) return;
+        if (other.CompareTag("Item")) return;
+
         //대상이 누구든 부딪히면 파괴
         StartCoroutine(this.ExplosionCannon(0.0f));
     }

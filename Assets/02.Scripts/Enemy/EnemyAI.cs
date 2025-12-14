@@ -1,6 +1,10 @@
 ﻿using UnityEngine;
 using UnityEngine.AI;
 
+#if PHOTON_UNITY_NETWORKING 
+using Photon.Pun;
+#endif
+
 public class EnemyAI : MonoBehaviour
 {
     [Header("데이터")]
@@ -10,6 +14,21 @@ public class EnemyAI : MonoBehaviour
     public NavMeshAgent agent;
     public Transform turret;
     public Transform firePoint;
+
+    [Header("포신 상하각(Pitch)")]
+    public Transform cannonPitch;      // 포신/캐논 피치용 트랜스폼 (Cannon 또는 FirePoint 부모)
+    public float pitchMin = -5f;
+    public float pitchMax = 25f;
+
+    [Header("탄도(포물선) 세팅")]
+    public float muzzleSpeed = 40f;    // 포탄 초기 속도(너 포탄 스피드에 맞게)
+    public bool useBallisticAim = true;
+    public float aimOffsetY = 1.0f;    // 목표를 약간 위로 조준(탱크 중심부)
+
+    [Header("피격/탄 날아옴 반응")]
+    public float incomingLookDuration = 1.5f;
+    private float incomingLookTimer = 0f;
+    private Vector3 incomingLookDir = Vector3.forward;
 
     [Header("패트롤 경로 (기본/중전차용)")]
     public Transform[] patrolPoints;
@@ -32,9 +51,17 @@ public class EnemyAI : MonoBehaviour
 
     private enum EnemyState { Patrol, Chase }
     private EnemyState state = EnemyState.Patrol;
-
     void Start()
     {
+    #if PHOTON_UNITY_NETWORKING
+            if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient)
+            {
+                // 비마스터는 AI 로직/Agent 끄고, 위치 동기화만 받게
+                if (agent != null) agent.enabled = false;
+                enabled = false;
+                return;
+            }
+    #endif
         if (agent == null)
             agent = GetComponent<NavMeshAgent>();
 
@@ -43,6 +70,12 @@ public class EnemyAI : MonoBehaviour
             Debug.LogError("EnemyData가 설정되지 않았습니다.", this);
             enabled = false;
             return;
+        }
+        //탄의 속도를 enemydata와 맞춰줌
+        if (enemyData != null && enemyData.bulletPrefab != null)
+        {
+            var eb = enemyData.bulletPrefab.GetComponent<EnemyBullet>();
+            if (eb != null) muzzleSpeed = eb.speed;
         }
 
         // NavMeshAgent 기본 세팅
@@ -99,12 +132,139 @@ public class EnemyAI : MonoBehaviour
         }
 
         // 4) 포탑 회전 + 사격
+        RotateTurretYaw(canSee);
+        RotateCannonPitch(canSee);
         HandleShooting(canSee, dist);
-        RotateTurret(canSee);
+    }
+    void RotateTurretYaw(bool canSee)
+    {
+        if (turret == null) return;
+
+        // 1) 탄이 날아온 반응이 우선
+        if (incomingLookTimer > 0f)
+        {
+            incomingLookTimer -= Time.deltaTime;
+
+            Vector3 dir = incomingLookDir;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 0.01f) return;
+
+            Quaternion targetRot = Quaternion.LookRotation(dir);
+            turret.rotation = Quaternion.RotateTowards(
+                turret.rotation,
+                targetRot,
+                enemyData.rotationSpeed * Time.deltaTime
+            );
+            return;
+        }
+
+        // 2) 평소에는 타겟이 보일 때만 회전
+        if (!canSee || target == null) return;
+
+        Vector3 toTarget = target.position - turret.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude < 0.01f) return;
+
+        Quaternion lookRot = Quaternion.LookRotation(toTarget);
+        turret.rotation = Quaternion.RotateTowards(
+            turret.rotation,
+            lookRot,
+            enemyData.rotationSpeed * Time.deltaTime
+        );
+    }
+    void RotateCannonPitch(bool canSee)
+    {
+        if (cannonPitch == null || firePoint == null) return;
+
+        // 1) 탄 날아온 반응 중이면: 그냥 그 방향으로 "직접" 피치 맞추기(탄도 계산 X)
+        if (incomingLookTimer > 0f)
+        {
+            Vector3 dir = incomingLookDir.normalized;
+            ApplyPitchFromDirection(dir);
+            return;
+        }
+
+        // 2) 타겟 못 보면 피치 조정 안 함
+        if (!canSee || target == null) return;
+
+        Vector3 targetPos = target.position + Vector3.up * aimOffsetY;
+
+        if (useBallisticAim)
+        {
+            if (TryGetBallisticDirection(firePoint.position, targetPos, muzzleSpeed, out Vector3 ballisticDir))
+            {
+                ApplyPitchFromDirection(ballisticDir);
+            }
+            else
+            {
+                // 사거리/속도 조건 때문에 탄도 해가 없으면 그냥 직접 조준
+                Vector3 directDir = (targetPos - firePoint.position).normalized;
+                ApplyPitchFromDirection(directDir);
+            }
+        }
+        else
+        {
+            Vector3 directDir = (targetPos - firePoint.position).normalized;
+            ApplyPitchFromDirection(directDir);
+        }
     }
 
-    // ================ 타겟 갱신 (4인 협동용 핵심) ================
+    void ApplyPitchFromDirection(Vector3 worldDir)
+    {
+        // 캐논 로컬 기준으로 X축 회전(일반적으로 pitch = local X)
+        // firePoint의 forward가 worldDir을 향하도록 캐논 pitch만 조정
+        Quaternion worldLook = Quaternion.LookRotation(worldDir, Vector3.up);
 
+        // 캐논Pitch의 "부모 기준" 로컬 회전으로 변환
+        Transform parent = cannonPitch.parent;
+        Quaternion localLook = (parent != null)
+            ? Quaternion.Inverse(parent.rotation) * worldLook
+            : worldLook;
+
+        Vector3 euler = localLook.eulerAngles;
+
+        // Unity euler 0~360 보정 → -180~180
+        float pitch = euler.x;
+        if (pitch > 180f) pitch -= 360f;
+
+        pitch = Mathf.Clamp(pitch, pitchMin, pitchMax);
+
+        // pitch만 적용 (y/z는 기존 유지)
+        Vector3 current = cannonPitch.localEulerAngles;
+        float curX = current.x;
+        if (curX > 180f) curX -= 360f;
+
+        cannonPitch.localEulerAngles = new Vector3(pitch, current.y, current.z);
+    }
+
+    // 탄도 방향 계산(낮은 각도 우선)
+    bool TryGetBallisticDirection(Vector3 from, Vector3 to, float speed, out Vector3 dir)
+    {
+        dir = Vector3.forward;
+
+        Vector3 diff = to - from;
+        Vector3 diffXZ = new Vector3(diff.x, 0f, diff.z);
+        float x = diffXZ.magnitude;     // 수평 거리
+        float y = diff.y;               // 높이 차
+        float g = Mathf.Abs(Physics.gravity.y);
+
+        float v2 = speed * speed;
+        float v4 = v2 * v2;
+
+        float discriminant = v4 - g * (g * x * x + 2f * y * v2);
+        if (discriminant < 0f) return false;
+
+        float sqrt = Mathf.Sqrt(discriminant);
+
+        // 낮은 각도(직사에 가까운) 선택
+        float tan = (v2 - sqrt) / (g * x);
+        float angle = Mathf.Atan(tan); // rad
+
+        Vector3 flatDir = diffXZ.normalized;
+        dir = (flatDir * Mathf.Cos(angle) + Vector3.up * Mathf.Sin(angle)).normalized;
+        return true;
+    }
+    // ================ 타겟 갱신 (4인 협동용 핵심) ================
     void UpdateTarget()
     {
         // 태그 "Player"가 붙은 모든 탱크를 찾는다 (최대 4명)
@@ -280,22 +440,22 @@ public class EnemyAI : MonoBehaviour
     }
 
     // ================ 포탑 회전 / 사격 ================
+    //이 함수는 포탑회전만 담당 -> 포탑회전과 포신 상하 각도를 제어하는 코드 추가.
+    //void RotateTurret(bool canSee)
+    //{
+    //    if (!canSee || turret == null || target == null) return;
 
-    void RotateTurret(bool canSee)
-    {
-        if (!canSee || turret == null || target == null) return;
+    //    Vector3 dir = target.position - turret.position;
+    //    dir.y = 0f;
+    //    if (dir.sqrMagnitude < 0.01f) return;
 
-        Vector3 dir = target.position - turret.position;
-        dir.y = 0f;
-        if (dir.sqrMagnitude < 0.01f) return;
-
-        Quaternion targetRot = Quaternion.LookRotation(dir);
-        turret.rotation = Quaternion.RotateTowards(
-            turret.rotation,
-            targetRot,
-            enemyData.rotationSpeed * Time.deltaTime
-        );
-    }
+    //    Quaternion targetRot = Quaternion.LookRotation(dir);
+    //    turret.rotation = Quaternion.RotateTowards(
+    //        turret.rotation,
+    //        targetRot,
+    //        enemyData.rotationSpeed * Time.deltaTime
+    //    );
+    //}
 
     void HandleShooting(bool canSee, float dist)
     {
@@ -360,5 +520,12 @@ public class EnemyAI : MonoBehaviour
         Gizmos.color = Color.cyan;
         Gizmos.DrawRay(transform.position, leftDir * enemyData.detectionRange);
         Gizmos.DrawRay(transform.position, rightDir * enemyData.detectionRange);
+    }
+    public void NotifyIncomingFire(Vector3 projectileVelocityDir)
+    {
+        // 포탄은 "발사자 -> 적" 방향으로 날아옴
+        // 발사자를 바라보려면 반대 방향을 봐야 함
+        incomingLookDir = (-projectileVelocityDir).normalized;
+        incomingLookTimer = incomingLookDuration;
     }
 }

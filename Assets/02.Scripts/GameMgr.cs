@@ -114,6 +114,8 @@ public class GameMgr : MonoBehaviourPunCallbacks
     }
     void SpawnWave(int wave)
     {
+        if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient) return;
+
         // 현재 방 플레이어 수
         int playerCount = (PhotonNetwork.CurrentRoom != null)
             ? PhotonNetwork.CurrentRoom.PlayerCount

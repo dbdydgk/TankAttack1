@@ -21,9 +21,28 @@ public class ItemSpawner : MonoBehaviourPun
 
     float timer;
 
+    [Header("아이템 바닥 정렬(피벗/콜라이더 보정)")]
+    public bool alignToGroundUsingPrefabCollider = true;
+    private float cachedHalfHeight = 0.0f;
     void Start()
     {
         timer = spawnInterval;
+
+        if (alignToGroundUsingPrefabCollider)
+        {
+            var prefab = Resources.Load<GameObject>(prefabName);
+            if (prefab != null)
+            {
+                // 런타임에서 프리팹 bounds 얻기 위해 임시로 한 번 생성
+                var temp = Instantiate(prefab);
+                temp.SetActive(false);
+
+                Collider c = temp.GetComponentInChildren<Collider>();
+                if (c != null) cachedHalfHeight = c.bounds.extents.y;
+
+                Destroy(temp);
+            }
+        }
 
         // 에디터에서 시작하자마자 1개 찍어보기
         if (spawnOneOnStart && PhotonNetwork.InRoom)
@@ -89,24 +108,28 @@ public class ItemSpawner : MonoBehaviourPun
 
         Bounds b = spawnArea.bounds;
 
-        // 충분히 큰 값으로 고정 (맵 크기 커져도 안전)
-        float startY = b.max.y + 200f;
-        float dist = 2000f;
-
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 20; i++)
         {
             float x = Random.Range(b.min.x, b.max.x);
             float z = Random.Range(b.min.z, b.max.z);
 
-            Vector3 origin = new Vector3(x, startY, z);
-            Debug.DrawRay(origin, Vector3.down * dist, Color.green, 1f);
+            Vector3 origin = new Vector3(x, b.max.y + raycastHeight, z);
 
-            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, dist, groundMask))
+            // Trigger(SpawnArea 같은 것) 무시하고, TERRAIN만 맞추기
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit,
+                    raycastHeight * 2f, groundMask, QueryTriggerInteraction.Ignore))
             {
-                result = hit.point + Vector3.up * groundOffset;
+                float yOffset = groundOffset;
+
+                // 프리팹 콜라이더 반높이만큼 올려서 “바닥에 닿게”
+                if (alignToGroundUsingPrefabCollider && cachedHalfHeight > 0.0001f)
+                    yOffset += cachedHalfHeight;
+
+                result = hit.point + Vector3.up * yOffset;
                 return true;
             }
         }
+
         return false;
     }
 }

@@ -29,8 +29,12 @@ public class EnemyBullet : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        //적 포탄이 생성되자마자 스폰영역 콜리더에 충돌하는 문제를 해결
+        //적 포탄이 생성되자마자 스폰영역 콜리더에 충돌하는 문제를 해결하기 위함
         if (other.CompareTag("SpawnArea")) return;
+        //적의 탐지 영역 콜리더와 포탄이 충돌하는 문제를 해결하기 위함
+        if (other.CompareTag("EnemySensor")) return;
+        //아이템 콜리더도 충돌에서 제외
+        if (other.CompareTag("Item")) return;
 
         TankDamage td = other.GetComponentInParent<TankDamage>();
 

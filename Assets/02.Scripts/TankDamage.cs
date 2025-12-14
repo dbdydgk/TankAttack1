@@ -59,19 +59,22 @@ public class TankDamage : MonoBehaviour
             {
                 damage = cn.damage;
             }
+            
             TakeDamage(damage);
-            //현재 생명치 백분율 계산
-            hpBar.fillAmount = (float)currHp / (float)initHp;
-            //40%이하는 빨간색, 60% 이하는 노란색
-            if(hpBar.fillAmount <= 0.4f) 
-                hpBar.color = Color.red;
-            else if(hpBar.fillAmount <=0.6f)
-                hpBar.color = Color.yellow;
 
-            if (currHp <= 0)
-            {
-                StartCoroutine(ExplosionTank());
-            }
+            //TakeDamage함수에서 모두 처리하여 주석처리 함
+            ////현재 생명치 백분율 계산
+            //hpBar.fillAmount = (float)currHp / (float)initHp;
+            ////40%이하는 빨간색, 60% 이하는 노란색
+            //if(hpBar.fillAmount <= 0.4f) 
+            //    hpBar.color = Color.red;
+            //else if(hpBar.fillAmount <=0.6f)
+            //    hpBar.color = Color.yellow;
+
+            //if (currHp <= 0)
+            //{
+            //    StartCoroutine(ExplosionTank());
+            //}
         }
     }
     IEnumerator ExplosionTank()
