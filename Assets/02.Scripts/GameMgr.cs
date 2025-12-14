@@ -217,6 +217,7 @@ public class GameMgr : MonoBehaviourPunCallbacks
     void CreateTank()
     {
         Vector3 spawnPos;
+        Quaternion spawnRot = Quaternion.identity;
 
         if (isPvpMode)
         {
@@ -240,13 +241,18 @@ public class GameMgr : MonoBehaviourPunCallbacks
 
             int idx = (PhotonNetwork.LocalPlayer.ActorNumber - 1) 
                 % playerSpawnPoints.Length;
-            spawnPos = playerSpawnPoints[idx].position;
+
+            Transform sp = playerSpawnPoints[idx];
+            spawnPos = sp.position;
+            // 스폰 포인트 회전을 그대로 쓰기
+            spawnRot = sp.rotation;
+
             Debug.Log($"[CreateTank] PVE SpawnPoint idx={idx}, " +
                 $"name={playerSpawnPoints[idx].name}, pos={spawnPos}");
         }
 
         int tankIndex = Mathf.Clamp(PlayerInfo.SelectedTankIndex, 0, tanks.Length - 1);
-        var go = PhotonNetwork.Instantiate(tanks[tankIndex], spawnPos, Quaternion.identity, 0);
+        var go = PhotonNetwork.Instantiate(tanks[tankIndex], spawnPos, spawnRot, 0);
 
         Debug.Log($"[CreateTank] Spawned={go.name}, finalPos={go.transform.position}");
     }

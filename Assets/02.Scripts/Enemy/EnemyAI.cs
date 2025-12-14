@@ -21,7 +21,7 @@ public class EnemyAI : MonoBehaviour
     public float pitchMax = 25f;
 
     [Header("탄도(포물선) 세팅")]
-    public float muzzleSpeed = 40f;    // 포탄 초기 속도(너 포탄 스피드에 맞게)
+    public float muzzleSpeed = 40f;    // 포탄 초기 속도(=포탄 스피드에 맞게)
     public bool useBallisticAim = true;
     public float aimOffsetY = 1.0f;    // 목표를 약간 위로 조준(탱크 중심부)
 
@@ -85,10 +85,10 @@ public class EnemyAI : MonoBehaviour
 
         currentHP = enemyData.maxHP;
 
-        // 기본/중전차는 패트롤 시작, 자주곡사포는 스폰 위치 유지
+        // 기본/중전차는 패트롤 시작
         if (enemyData.role == EnemyRole.Artillery)
         {
-            agent.SetDestination(transform.position); // 처음엔 제자리
+            if (agent!= null) agent.enabled = false; //곡사포는 이동 불가
         }
         else
         {
@@ -362,47 +362,48 @@ public class EnemyAI : MonoBehaviour
     }
 
     // ================ 자주곡사포 (거리 10~18m 유지) ================
-
+    // 곡사포 에셋이 없다...그래서 곡사포는 고정식으로 변경
     void UpdateArtillery(bool canSee, Vector3 toTarget, float dist)
     {
-        if (!canSee || target == null)
-        {
-            // 플레이어를 못 보면 스폰 위치 근처에서 대기
-            if (!agent.hasPath)
-                agent.SetDestination(transform.position);
-            return;
-        }
+        //if (!canSee || target == null)
+        //{
+        //    // 플레이어를 못 보면 스폰 위치 근처에서 대기
+        //    if (!agent.hasPath)
+        //        agent.SetDestination(transform.position);
+        //    return;
+        //}
 
-        Vector3 dir = toTarget.normalized;
+        //Vector3 dir = toTarget.normalized;
 
-        // 너무 가까우면 멀어지기
-        if (dist < enemyData.preferredMinDistance)
-        {
-            Vector3 targetPos = transform.position - dir * 5f;
-            MoveToNavmeshPoint(targetPos);
-        }
-        // 너무 멀면 조금 다가가기
-        else if (dist > enemyData.preferredMaxDistance)
-        {
-            Vector3 targetPos = transform.position + dir * 5f;
-            MoveToNavmeshPoint(targetPos);
-        }
-        else
-        {
-            // 적당한 거리면 제자리 유지
-            if (!agent.hasPath || agent.remainingDistance > 0.5f)
-                agent.SetDestination(transform.position);
-        }
+        //// 너무 가까우면 멀어지기
+        //if (dist < enemyData.preferredMinDistance)
+        //{
+        //    Vector3 targetPos = transform.position - dir * 5f;
+        //    MoveToNavmeshPoint(targetPos);
+        //}
+        //// 너무 멀면 조금 다가가기
+        //else if (dist > enemyData.preferredMaxDistance)
+        //{
+        //    Vector3 targetPos = transform.position + dir * 5f;
+        //    MoveToNavmeshPoint(targetPos);
+        //}
+        //else
+        //{
+        //    // 적당한 거리면 제자리 유지
+        //    if (!agent.hasPath || agent.remainingDistance > 0.5f)
+        //        agent.SetDestination(transform.position);
+        //}
+        return;
     }
-
-    void MoveToNavmeshPoint(Vector3 targetPos)
-    {
-        NavMeshHit hit;
-        if (NavMesh.SamplePosition(targetPos, out hit, 3f, NavMesh.AllAreas))
-        {
-            agent.SetDestination(hit.position);
-        }
-    }
+    //자주곡사포가 navmesh 안에서 이동할 수 있도록 하는 함수(사용 안함)
+    //void MoveToNavmeshPoint(Vector3 targetPos)
+    //{
+    //    NavMeshHit hit;
+    //    if (NavMesh.SamplePosition(targetPos, out hit, 3f, NavMesh.AllAreas))
+    //    {
+    //        agent.SetDestination(hit.position);
+    //    }
+    //}
 
     // ================ 시야 판정 ================
 
@@ -473,38 +474,78 @@ public class EnemyAI : MonoBehaviour
 
     void Shoot()
     {
-        if (enemyData.bulletPrefab == null || firePoint == null) return;
+        if (enemyData == null || enemyData.bulletPrefab == null || firePoint == null) return;
 
-    #if PHOTON_UNITY_NETWORKING
-        // 멀티(룸)에서는 마스터만 네트워크로 발사
+#if PHOTON_UNITY_NETWORKING
+        // 멀티(룸)에서는 마스터만 발사/생성
         if (PhotonNetwork.InRoom)
         {
             if (!PhotonNetwork.IsMasterClient) return;
 
-            // Resources에 있는 프리팹 이름이 필요
-            // enemyData.bulletPrefab이 Resources 프리팹이면 이름으로 Instantiate 가능
             string prefabName = enemyData.bulletPrefab.name;
 
-            GameObject bulletObj = PhotonNetwork.Instantiate(
-                prefabName,
-                firePoint.position,
-                firePoint.rotation
-            );
-
-            // 데미지 세팅 (모든 클라에서 동일해야 하므로 RPC로 세팅하거나 OnPhotonSerializeView 사용)
+            GameObject bulletObj = PhotonNetwork.Instantiate(prefabName, firePoint.position, firePoint.rotation);
             PhotonView bpv = bulletObj.GetComponent<PhotonView>();
-            if (bpv != null)
-                bpv.RPC(nameof(EnemyBullet.RpcInit), RpcTarget.AllBuffered, enemyData.damage);
 
+            // 1) 곡사포탄 (EnemyArtilleryCannon)
+            EnemyArtilleryCannon art = bulletObj.GetComponent<EnemyArtilleryCannon>();
+            if (art != null)
+            {
+                int maxD = enemyData.damage;
+
+                // minDamage / splashRadius / lifeTime 은 프리팹 기본값을 사용
+                int minD = art.minDamage;
+                float radius = art.splashRadius;
+                float life = art.lifeTime;
+
+                // 속도는 EnemyAI의 muzzleSpeed를 사용
+                float spd = muzzleSpeed;
+
+                if (bpv != null)
+                    bpv.RPC(nameof(EnemyArtilleryCannon.RpcInit), RpcTarget.All, maxD, minD, radius, spd, life);
+
+                return;
+            }
+
+            // 2) 직사포탄 (EnemyBullet)
+            EnemyBullet b = bulletObj.GetComponent<EnemyBullet>();
+            if (b != null)
+            {
+                // owner(마스터)가 Start에서 linearVelocity를 세팅하므로,
+                // Start 실행 전에 speed를 먼저 넣어주면 됨.
+                b.speed = muzzleSpeed;
+
+                if (bpv != null)
+                    bpv.RPC(nameof(EnemyBullet.RpcInit), RpcTarget.All, enemyData.damage);
+
+                return;
+            }
+
+            // 3) 둘 다 아니면 그냥 종료 (프리팹 세팅 문제)
             return;
         }
-    #endif
+#endif
 
         // 싱글/오프라인
         GameObject bulletLocal = Instantiate(enemyData.bulletPrefab, firePoint.position, firePoint.rotation);
-        EnemyBullet b = bulletLocal.GetComponent<EnemyBullet>();
-        if (b != null) b.damage = enemyData.damage;
+
+        EnemyArtilleryCannon artLocal = bulletLocal.GetComponent<EnemyArtilleryCannon>();
+        if (artLocal != null)
+        {
+            artLocal.maxDamage = enemyData.damage;
+            artLocal.speed = muzzleSpeed;
+            return;
+        }
+
+        EnemyBullet bLocal = bulletLocal.GetComponent<EnemyBullet>();
+        if (bLocal != null)
+        {
+            bLocal.damage = enemyData.damage;
+            bLocal.speed = muzzleSpeed;
+            return;
+        }
     }
+
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================
 
