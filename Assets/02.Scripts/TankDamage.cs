@@ -16,6 +16,16 @@ public class TankDamage : MonoBehaviourPun
 
     bool isDead = false;    //적 탱크 죽었는지 여부
 
+    public Behaviour[] disableBehavioursOnDeath;
+
+    public Collider[] disableCollidersOnDeath;
+
+    Rigidbody rb;
+    RigidbodyConstraints rbConstraintsBackup;
+    bool rbKinematicBackup;
+    //EnemyAI에서 참조할 프로퍼티
+    public bool IsDead => isDead;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
@@ -25,6 +35,45 @@ public class TankDamage : MonoBehaviourPun
         expEffect = Resources.Load<GameObject>("Exploson10");
         hpBar.color = Color.green; // Filled 이미지 색상을 녹색으로..
         ApplyHpUI();    //초기 UI 반영
+
+        rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rbConstraintsBackup = rb.constraints;
+            rbKinematicBackup = rb.isKinematic;
+        }
+    }
+    void SetDeadState(bool dead)
+    {
+        // 이동/물리 멈춤
+        if (rb != null)
+        {
+            if (dead)
+            {
+                rb.linearVelocity = Vector3.zero;   // Unity 6.2 기준
+                rb.angularVelocity = Vector3.zero;
+                rb.constraints = RigidbodyConstraints.FreezeAll;
+            }
+            else
+            {
+                rb.constraints = rbConstraintsBackup;
+                rb.isKinematic = rbKinematicBackup;
+            }
+        }
+
+        // 입력/이동/발사 스크립트 끄기(인스펙터로 지정)
+        if (disableBehavioursOnDeath != null)
+        {
+            foreach (var b in disableBehavioursOnDeath)
+                if (b != null) b.enabled = !dead;
+        }
+
+        // 콜라이더 꺼서 죽은 동안 맞거나 밀리는 것도 방지(선택)
+        if (disableCollidersOnDeath != null)
+        {
+            foreach (var c in disableCollidersOnDeath)
+                if (c != null) c.enabled = !dead;
+        }
     }
     // EnemyBullet에서 직접 호출할 수 있도록 공개 함수로 분리
     public void TakeDamage(int amount)
@@ -32,21 +81,46 @@ public class TankDamage : MonoBehaviourPun
         if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
 
-        // 중요: 소유자만 체력 변경 (여기서 동기화 갈림 방지)
-        if (PhotonNetwork.IsConnected && photonView != null && !photonView.IsMine)
+        // 온라인이면 "마스터 권한"으로 통일
+        if (PhotonNetwork.IsConnected)
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                ApplyDamageAsMaster(amount);
+            }
+            else
+            {
+                // 맞춘 쪽(클라)은 마스터에게 데미지 요청
+                photonView.RPC(nameof(RpcRequestDamage), RpcTarget.MasterClient, amount);
+            }
             return;
+        }
+
+        // 오프라인(싱글)
+        ApplyDamageAsMaster(amount);
+    }
+    [PunRPC]
+    void RpcRequestDamage(int amount, PhotonMessageInfo info)
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+        ApplyDamageAsMaster(amount);
+    }
+    void ApplyDamageAsMaster(int amount)
+    {
+        if (amount <= 0) return;
+        if (currHp <= 0 || isDead) return;
 
         currHp -= amount;
         if (currHp < 0) currHp = 0;
 
-        // 모든 클라이언트에게 HP/죽음 상태 동기화
+        // 전원 동기화는 기존대로
         photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
 
         if (currHp <= 0 && !isDead)
         {
             isDead = true;
-            photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);  // 폭발/숨김은 모두 동일하게
-            StartCoroutine(ExplosionTankOwner());                   // 실제 파괴/부활 로직은 소유자만
+            photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);
+            StartCoroutine(ExplosionTankOwner()); // 너 기존 로직 유지
         }
     }
     IEnumerator ExplosionTankOwner()
@@ -103,50 +177,51 @@ public class TankDamage : MonoBehaviourPun
             //}
         }
     }
-    IEnumerator ExplosionTank()
-    {
-        //폭발효과 생성
-        GameObject effect = GameObject.Instantiate(expEffect,
-            transform.position, Quaternion.identity);
+    //플레이어 죽음과 적 탱크 죽음 따로 나누는 ExplosionTank 함수 새로 작성함.
+    //IEnumerator ExplosionTank()
+    //{
+    //    //폭발효과 생성
+    //    GameObject effect = GameObject.Instantiate(expEffect,
+    //        transform.position, Quaternion.identity);
 
-        Destroy(effect, 3.0f);//3초뒤에 파괴
+    //    Destroy(effect, 3.0f);//3초뒤에 파괴
 
-        hudCanvas.enabled = false;//HUD캔버스 안보이게
-        SetTankVisible(false); //탱크 안보이게
-        // 이 오브젝트가 "Enemy" 태그면 = 적 탱크 → 그냥 파괴하고 끝
-        if (CompareTag("Enemy"))
-        {
-            // 네트워크 오브젝트면 PhotonNetwork.Destroy 사용
-            PhotonView pv = GetComponent<PhotonView>();
-            if (pv != null && PhotonNetwork.IsConnected && pv.IsMine)
-            {
-                PhotonNetwork.Destroy(gameObject);
-            }
-            else
-            {
-                Destroy(gameObject);
-            }
+    //    hudCanvas.enabled = false;//HUD캔버스 안보이게
+    //    SetTankVisible(false); //탱크 안보이게
+    //    // 이 오브젝트가 "Enemy" 태그면 = 적 탱크 → 그냥 파괴하고 끝
+    //    if (CompareTag("Enemy"))
+    //    {
+    //        // 네트워크 오브젝트면 PhotonNetwork.Destroy 사용
+    //        PhotonView pv = GetComponent<PhotonView>();
+    //        if (pv != null && PhotonNetwork.IsConnected && pv.IsMine)
+    //        {
+    //            PhotonNetwork.Destroy(gameObject);
+    //        }
+    //        else
+    //        {
+    //            Destroy(gameObject);
+    //        }
 
-            yield break;
-        }
+    //        yield break;
+    //    }
 
-        float respawnDelay = GetRespawnDelay();
-        yield return new WaitForSeconds(respawnDelay);
+    //    float respawnDelay = GetRespawnDelay();
+    //    yield return new WaitForSeconds(respawnDelay);
 
-        // 체력/HP바/메쉬 복구 → 부활
-        currHp = initHp;
+    //    // 체력/HP바/메쉬 복구 → 부활
+    //    currHp = initHp;
 
-        if (hpBar != null)
-        {
-            hpBar.fillAmount = 1.0f;
-            hpBar.color = Color.green;
-        }
+    //    if (hpBar != null)
+    //    {
+    //        hpBar.fillAmount = 1.0f;
+    //        hpBar.color = Color.green;
+    //    }
 
-        if (hudCanvas != null)
-            hudCanvas.enabled = true;
+    //    if (hudCanvas != null)
+    //        hudCanvas.enabled = true;
 
-        SetTankVisible(true);
-    }
+    //    SetTankVisible(true);
+    //}
     float GetRespawnDelay()
     {
         GameMgr gm = FindObjectOfType<GameMgr>();
@@ -171,9 +246,28 @@ public class TankDamage : MonoBehaviourPun
         if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
 
-        if (PhotonNetwork.IsConnected && photonView != null && !photonView.IsMine)
-            return;
+        // 힐도 마스터 권한으로 통일(안 그러면 클라/마스터 간 힐 desync 남)
+        if (PhotonNetwork.IsConnected)
+        {
+            if (PhotonNetwork.IsMasterClient)
+                ApplyHealAsMaster(amount);
+            else
+                photonView.RPC(nameof(RpcRequestHeal), RpcTarget.MasterClient, amount);
 
+            return;
+        }
+
+        ApplyHealAsMaster(amount);
+    }
+    [PunRPC]
+    void RpcRequestHeal(int amount)
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+        ApplyHealAsMaster(amount);
+    }
+
+    void ApplyHealAsMaster(int amount)
+    {
         currHp = Mathf.Clamp(currHp + amount, 0, initHp);
         photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
     }
@@ -189,12 +283,21 @@ public class TankDamage : MonoBehaviourPun
             isDead = false;
             if (hudCanvas != null) hudCanvas.enabled = true;
             SetTankVisible(true);
+
+            SetDeadState(false);
         }
     }
 
     [PunRPC]
     void RpcDeathVisual()
     {
+        if (hudCanvas != null) hudCanvas.enabled = false;
+        SetTankVisible(false);
+
+        // 추가
+        isDead = true;
+        SetDeadState(true);
+
         // 죽음 연출은 모든 클라이언트 동일하게
         if (expEffect != null)
         {

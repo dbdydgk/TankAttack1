@@ -283,6 +283,10 @@ public class EnemyAI : MonoBehaviour
         {
             if (!p.activeInHierarchy) continue; // 비활성 플레이어 무시
 
+            // 추가: 죽은 플레이어는 타겟에서 제외
+            TankDamage td = p.GetComponent<TankDamage>();
+            if (td != null && td.IsDead) continue;
+
             Vector3 diff = p.transform.position - pos;
             float dSq = diff.sqrMagnitude;
 
