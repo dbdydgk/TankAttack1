@@ -10,7 +10,6 @@ public class SelectTankManager : MonoBehaviour
     [Header("UI 패널")]
     public GameObject selectPanel;        // 탱크 선택 패널 (처음에는 비활성화)
 
-
     [Header("UI 텍스트")]
     public Text tankNameTxt;
     public Text tankSpecTxt;
@@ -19,6 +18,9 @@ public class SelectTankManager : MonoBehaviour
     int currentIndex;
 
     private int tankPreviewLayer;
+
+    public Toggle pvpToggle;
+    public Dropdown mapDropdown;
 
     private void Awake()
     {
@@ -40,12 +42,16 @@ public class SelectTankManager : MonoBehaviour
     public void OpenSelectPanel()
     {
         selectPanel.SetActive(true);
+        pvpToggle.gameObject.SetActive(false);
+        mapDropdown.gameObject.SetActive(false);
     }
 
     // 패널 닫기(취소 버튼 등)
     public void CloseSelectPanel()
     {
         selectPanel.SetActive(false);
+        pvpToggle.gameObject.SetActive(true);
+        mapDropdown.gameObject.SetActive(true);
     }
 
     // 다음 탱크 버튼 →
@@ -76,6 +82,8 @@ public class SelectTankManager : MonoBehaviour
         PlayerPrefs.Save();
 
         selectPanel.SetActive(false);
+        pvpToggle.gameObject.SetActive(true);
+        mapDropdown.gameObject.SetActive(true);
     }
 
     // ====== 내부에서만 사용하는 함수 ======

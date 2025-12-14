@@ -41,6 +41,10 @@ public class EnemyAI : MonoBehaviour
     [Header("플레이어 놓쳤을 때 (기본/중전차용)")]
     public float losePlayerDelay = 3f;
 
+    [Header("곡사포 착탄 세팅")]
+    public float artilleryArcHeight = 6f;      // 낮추면 궤도 낮아짐
+    public float artilleryTargetYOffset = 0f;  // 필요하면 0~1 정도
+
     // 현재 추적 중인 플레이어
     private Transform target;
 
@@ -501,8 +505,16 @@ public class EnemyAI : MonoBehaviour
                 // 속도는 EnemyAI의 muzzleSpeed를 사용
                 float spd = muzzleSpeed;
 
+                // 착탄지점 = 발사 순간 플레이어 위치
+                Vector3 impactPoint = (target != null)
+                    ? (target.position + Vector3.up * artilleryTargetYOffset)
+                    : (firePoint.position + firePoint.forward * 10f);
+
                 if (bpv != null)
-                    bpv.RPC(nameof(EnemyArtilleryCannon.RpcInit), RpcTarget.All, maxD, minD, radius, spd, life);
+                    bpv.RPC(nameof(EnemyArtilleryCannon.RpcInitWithTarget),
+                            RpcTarget.All,
+                            maxD, minD, radius, spd, life,
+                            impactPoint, artilleryArcHeight);
 
                 return;
             }
@@ -532,8 +544,13 @@ public class EnemyAI : MonoBehaviour
         EnemyArtilleryCannon artLocal = bulletLocal.GetComponent<EnemyArtilleryCannon>();
         if (artLocal != null)
         {
-            artLocal.maxDamage = enemyData.damage;
-            artLocal.speed = muzzleSpeed;
+            Vector3 impactPoint = (target != null)
+        ? (target.position + Vector3.up * artilleryTargetYOffset)
+        : (firePoint.position + firePoint.forward * 10f);
+
+            artLocal.InitWithTarget(enemyData.damage, artLocal.minDamage, artLocal.splashRadius,
+                                   muzzleSpeed, artLocal.lifeTime,
+                                   impactPoint, artilleryArcHeight);
             return;
         }
 
@@ -545,7 +562,6 @@ public class EnemyAI : MonoBehaviour
             return;
         }
     }
-
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================
 

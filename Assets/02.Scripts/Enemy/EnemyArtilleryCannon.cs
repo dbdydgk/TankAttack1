@@ -1,6 +1,5 @@
 ﻿using System.Collections;
 using Photon.Pun;
-using Photon.Realtime;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
@@ -8,13 +7,17 @@ using UnityEngine;
 public class EnemyArtilleryCannon : MonoBehaviourPun
 {
     [Header("피해")]
-    public int maxDamage = 40;     // 중심부 최대 데미지
-    public int minDamage = 15;     // 바깥 최소 데미지
+    public int maxDamage = 40;
+    public int minDamage = 15;
     public float splashRadius = 6f;
 
     [Header("이동")]
-    public float speed = 60f;      // Unity 6.2: linearVelocity 사용
+    public float speed = 60f;   // (이제는 참고값)
     public float lifeTime = 6f;
+
+    [Header("곡사 탄도")]
+    public float arcHeight = 6f;         // 최고점이 (start/target 중 높은 y) + arcHeight
+    public float lifeTimePadding = 0.3f; // 비행시간 + 여유
 
     [Header("이펙트")]
     public GameObject expEffect;
@@ -23,35 +26,39 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
     Collider col;
 
     bool exploded;
-    bool initialized;   // RpcInit을 받았는지
-    bool launched;      // 실제 발사(속도 세팅) 했는지
+    bool initialized;
+    bool launched;
+
+    // 추가: 착탄지점
+    bool hasTargetPoint;
+    Vector3 targetPoint;
+
+    [Header("충돌 보정")]
+    public float armDelay = 0.15f;   // 발사 직후 이 시간 동안은 충돌로 폭발 금지
+    private float armUntil = 0f;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         col = GetComponent<Collider>();
 
-        // 네트워크가 아닌(오프라인) 환경이면 바로 발사 가능
         if (!PhotonNetwork.IsConnected)
             initialized = true;
     }
 
     void Start()
     {
-        // 원격 클라는 물리 계산하지 않게 (위치/회전은 PhotonRigidbodyView로 받음)
         if (PhotonNetwork.IsConnected && !photonView.IsMine)
         {
             rb.isKinematic = true;
             return;
         }
 
-        // 오프라인이면 바로 발사
         if (!PhotonNetwork.IsConnected)
             LaunchIfNeeded();
-        // 온라인(Photon)에서는 RpcInit에서 발사 시작
     }
 
-    // EnemyAI에서 PhotonView.RPC로 호출할 초기화 함수
+    // 기존 RPC 유지(호환용) - 그대로 둬도 됨
     [PunRPC]
     public void RpcInit(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime)
     {
@@ -63,24 +70,105 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
         initialized = true;
 
-        // 발사는 "소유자(대부분 마스터)"만 수행
         if (photonView.IsMine)
             LaunchIfNeeded();
+    }
+
+    // 신규: 착탄지점 기반 초기화
+    [PunRPC]
+    public void RpcInitWithTarget(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
+    {
+        maxDamage = newMax;
+        minDamage = newMin;
+        splashRadius = newRadius;
+        speed = newSpeed;
+        lifeTime = newLifeTime;
+
+        targetPoint = newTargetPoint;
+        hasTargetPoint = true;
+        arcHeight = newArcHeight;
+
+        initialized = true;
+
+        if (photonView.IsMine)
+            LaunchIfNeeded();
+    }
+
+    // 오프라인에서 쓰기 편하게(선택)
+    public void InitWithTarget(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
+    {
+        maxDamage = newMax;
+        minDamage = newMin;
+        splashRadius = newRadius;
+        speed = newSpeed;
+        lifeTime = newLifeTime;
+
+        targetPoint = newTargetPoint;
+        hasTargetPoint = true;
+        arcHeight = newArcHeight;
+
+        initialized = true;
+        LaunchIfNeeded();
     }
 
     void LaunchIfNeeded()
     {
         if (!initialized || launched) return;
-
         launched = true;
+
+        armUntil = Time.time + armDelay;
 
         rb.isKinematic = false;
         rb.useGravity = true;
 
-        // firePoint의 forward 방향으로 초기 속도 부여 (곡사는 중력으로 자동 형성)
-        rb.linearVelocity = transform.forward * speed;
+        // 1) 착탄지점이 있으면: 그 지점으로 떨어지도록 초기 속도 계산
+        if (hasTargetPoint && TryGetVelocityToHitPoint(transform.position, targetPoint, arcHeight, out Vector3 v0, out float flightTime))
+        {
+            rb.linearVelocity = v0;
+
+            // 시각적으로 방향도 맞춰주고 싶으면(선택)
+            Vector3 flat = new Vector3(v0.x, 0f, v0.z);
+            if (flat.sqrMagnitude > 0.001f)
+                transform.rotation = Quaternion.LookRotation(flat);
+
+            // 2) 비행시간보다 lifeTime이 짧아서 공중폭발 나는 걸 방지
+            lifeTime = Mathf.Max(lifeTime, flightTime + lifeTimePadding);
+        }
+        else
+        {
+            // 실패 시 기존 방식(안전장치)
+            rb.linearVelocity = transform.forward * speed;
+        }
 
         StartCoroutine(AutoExplode());
+    }
+
+    bool TryGetVelocityToHitPoint(Vector3 from, Vector3 to, float extraArcHeight, out Vector3 v0, out float flightTime)
+    {
+        v0 = Vector3.zero;
+        flightTime = 0f;
+
+        float g = Mathf.Abs(Physics.gravity.y);
+        if (g < 0.001f) return false;
+
+        // 최고점 y를 강제로 지정 (항상 해가 존재하게 만들기)
+        float apexY = Mathf.Max(from.y, to.y) + Mathf.Max(0.5f, extraArcHeight);
+
+        float upHeight = apexY - from.y;
+        float downHeight = apexY - to.y;
+        if (upHeight < 0.01f || downHeight < 0.01f) return false;
+
+        float vy = Mathf.Sqrt(2f * g * upHeight);
+        float tUp = vy / g;
+        float tDown = Mathf.Sqrt(2f * downHeight / g);
+        float t = tUp + tDown;
+
+        Vector3 diffXZ = new Vector3(to.x - from.x, 0f, to.z - from.z);
+        Vector3 vXZ = diffXZ / t;
+
+        v0 = vXZ + Vector3.up * vy;
+        flightTime = t;
+        return true;
     }
 
     IEnumerator AutoExplode()
@@ -91,13 +179,18 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
     void OnTriggerEnter(Collider other)
     {
-        // 폭발 트리거/물리는 소유자만 처리 (중복 방지)
         if (!photonView.IsMine || exploded) return;
 
-        // 기존 예외 태그들
+        // 발사 직후 겹침으로 들어오는 트리거는 무시
+        if (Time.time < armUntil) return;
+
         if (other.CompareTag("SpawnArea")) return;
         if (other.CompareTag("EnemySensor")) return;
         if (other.CompareTag("Item")) return;
+
+        // 추가: 아군(적 탱크)과의 겹침/충돌은 무시
+        if (other.CompareTag("Enemy")) return;
+        if (other.transform.root != null && other.transform.root.CompareTag("Enemy")) return;
 
         Explode();
     }
@@ -107,7 +200,6 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
         if (exploded) return;
         exploded = true;
 
-        // 충돌 중복 방지
         if (col != null) col.enabled = false;
         if (rb != null)
         {
@@ -117,32 +209,19 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
         Vector3 pos = transform.position;
 
-        // 1) 데미지 적용은 무조건 "마스터만"
         if (PhotonNetwork.IsConnected)
         {
-            if (PhotonNetwork.IsMasterClient)
-            {
-                ApplySplashDamage(pos);
-            }
-            else
-            {
-                // 마스터가 아닌 경우: 마스터에게 "데미지 적용 요청"만 보냄
-                photonView.RPC(nameof(RPC_ApplySplashDamage), RpcTarget.MasterClient, pos);
-            }
+            if (PhotonNetwork.IsMasterClient) ApplySplashDamage(pos);
+            else photonView.RPC(nameof(RPC_ApplySplashDamage), RpcTarget.MasterClient, pos);
         }
         else
         {
-            // 오프라인은 그냥 적용
             ApplySplashDamage(pos);
         }
 
-        // 2) 이펙트는 모두에게
-        if (PhotonNetwork.IsConnected)
-            photonView.RPC(nameof(RPC_PlayFx), RpcTarget.All, pos);
-        else
-            RPC_PlayFx(pos);
+        if (PhotonNetwork.IsConnected) photonView.RPC(nameof(RPC_PlayFx), RpcTarget.All, pos);
+        else RPC_PlayFx(pos);
 
-        // 3) 삭제는 소유자(or 마스터)가 수행
         if (PhotonNetwork.IsConnected)
         {
             if (photonView.IsMine || PhotonNetwork.IsMasterClient)
@@ -157,7 +236,6 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
     [PunRPC]
     void RPC_ApplySplashDamage(Vector3 pos)
     {
-        // 안전장치: 마스터만 수행
         if (!PhotonNetwork.IsMasterClient) return;
         ApplySplashDamage(pos);
     }
@@ -165,21 +243,17 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
     void ApplySplashDamage(Vector3 center)
     {
         Collider[] hits = Physics.OverlapSphere(center, splashRadius);
-
         foreach (var h in hits)
         {
             TankDamage td = h.GetComponentInParent<TankDamage>();
             if (td == null) continue;
-
-            // 아군(Enemy)은 제외
             if (td.CompareTag("Enemy")) continue;
 
-            // 거리 기반 데미지 감소
             float d = Vector3.Distance(center, td.transform.position);
             float t = Mathf.Clamp01(1f - (d / splashRadius));
             int dmg = Mathf.RoundToInt(Mathf.Lerp(minDamage, maxDamage, t));
 
-            td.TakeDamage(dmg); // TankDamage 안에서 이미 isDead면 무시 처리됨
+            td.TakeDamage(dmg);
         }
     }
 
