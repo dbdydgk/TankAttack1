@@ -1,6 +1,9 @@
-﻿using UnityEngine;
+﻿using Photon.Pun;
+using UnityEngine;
 
-public class EnemyBullet : MonoBehaviour
+[RequireComponent(typeof(Rigidbody))]
+[RequireComponent(typeof(PhotonView))]
+public class EnemyBullet : MonoBehaviourPun
 {
     [Header("기본 설정")]
     public int damage = 20;          // EnemyData에서 받아올 데미지
@@ -19,21 +22,40 @@ public class EnemyBullet : MonoBehaviour
 
     void Start()
     {
-        // 앞으로 발사
-        if (rb != null)
-            rb.AddForce(transform.forward * speed, ForceMode.VelocityChange);
+        // 네트워크 오브젝트는 소유자(=마스터가 Instantiate 했으면 마스터)만 실제 물리로 발사한다.
+        if (PhotonNetwork.IsConnected)
+        {
+            if (photonView.IsMine)
+            {
+                LaunchPhysics();
+            }
+            // 원격은 LaunchPhysics() 호출하지 않음.
+            // PhotonRigidbodyView가 rb.velocity 등을 동기화해서 알아서 날아가게 됨.
+        }
+        else
+        {
+            // 오프라인(싱글)일 때는 그냥 로컬 물리로 발사
+            LaunchPhysics();
+        }
 
-        // 일정 시간 후 자동 파괴
         Destroy(gameObject, lifeTime);
     }
+    private void LaunchPhysics()
+    {
+        if (rb == null) return;
 
+        // AddForce도 가능하지만, 네트워크 동기화는 velocity로 “한 번에” 세팅하는 게 더 안정적임
+        rb.linearVelocity = transform.forward * speed;
+    }
     private void OnTriggerEnter(Collider other)
     {
-        //적 포탄이 생성되자마자 스폰영역 콜리더에 충돌하는 문제를 해결하기 위함
+        // 충돌 처리도 중복 방지: 소유자만 처리
+        if (PhotonNetwork.IsConnected && !photonView.IsMine)
+            return;
+
+        // 적 포탄이 생성되자마자 스폰영역 콜리더에 충돌하는 문제 방지
         if (other.CompareTag("SpawnArea")) return;
-        //적의 탐지 영역 콜리더와 포탄이 충돌하는 문제를 해결하기 위함
         if (other.CompareTag("EnemySensor")) return;
-        //아이템 콜리더도 충돌에서 제외
         if (other.CompareTag("Item")) return;
 
         TankDamage td = other.GetComponentInParent<TankDamage>();
@@ -56,24 +78,46 @@ public class EnemyBullet : MonoBehaviour
             }
         }
 
-        // 지형/기타에 부딪혀도 폭발 이펙트 + 포탄 제거
         ExplodeAndDestroy();
     }
 
     void ExplodeAndDestroy()
     {
-        if (col != null)
-            col.enabled = false;
-
+        // 이펙트/비주얼은 전원에게 보이게 RPC로 뿌리는 게 좋음
+        if (PhotonNetwork.IsConnected)
+        {
+            photonView.RPC(nameof(RpcExplodeVisual), RpcTarget.All, transform.position);
+            if (photonView.IsMine)
+                PhotonNetwork.Destroy(gameObject);   // 네트워크 전체 삭제
+        }
+        else
+        {
+            RpcExplodeVisual(transform.position);
+            Destroy(gameObject);
+        }
+    }
+    [PunRPC]
+    void RpcExplodeVisual(Vector3 pos)
+    {
+        if (col != null) col.enabled = false;
         if (rb != null)
+        {
+            rb.linearVelocity = Vector3.zero;
             rb.isKinematic = true;
+        }
 
         if (expEffect != null)
         {
-            GameObject fx = Instantiate(expEffect, transform.position, Quaternion.identity);
+            GameObject fx = Instantiate(expEffect, pos, Quaternion.identity);
             Destroy(fx, 1f);
         }
-
-        Destroy(gameObject);
     }
+
+    // EnemyAI에서 데미지 세팅하려고 쓰는 초기화 RPC는 유지
+    [PunRPC]
+    public void RpcInit(int newDamage)
+    {
+        damage = newDamage;
+    }
+    
 }

@@ -1,5 +1,6 @@
 ﻿using Photon.Pun;
 using Photon.Realtime;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -66,23 +67,27 @@ public class GameMgr : MonoBehaviourPunCallbacks
 
         }
 
-        CreateTank(); //탱크 생성
         PhotonNetwork.IsMessageQueueRunning = true;
+        
+    }
+    IEnumerator Start()
+    {
+        // 룸 들어갈 때까지 대기 (여기가 핵심)
+        yield return new WaitUntil(() => PhotonNetwork.InRoom);
+
         pv = GetComponent<PhotonView>();
         GetConnectPlayerCount();
-    }
-    private void Start()
-    {
-        string msg = "\n<color=#00ff00>["
-            + PhotonNetwork.NickName+"] Connected</color>";
+
+        // 이제부터는 룸 안이라 Instantiate/RPC 정상
+        CreateTank();
+
+        string msg = "\n<color=#00ff00>[" + PhotonNetwork.NickName + "] Connected</color>";
         pv.RPC("LogMsg", RpcTarget.AllBuffered, msg);
 
-        // PVE 모드 + 마스터 클라이언트만 웨이브 스폰 담당
         if (!isPvpMode && PhotonNetwork.IsMasterClient)
-        {
             StartCoroutine(WaveRoutine());
-        }
     }
+
     // =========================
     //  PVE: 웨이브 & 적 스폰
     // =========================

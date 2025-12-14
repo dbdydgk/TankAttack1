@@ -29,8 +29,8 @@ public class EnemyIncomingFireSensor : MonoBehaviour
         // 속도 방향 추출(가능하면 Rigidbody 우선)
         Vector3 velDir = Vector3.zero;
         Rigidbody rb = other.attachedRigidbody;
-        if (rb != null && rb.velocity.sqrMagnitude > 0.01f)
-            velDir = rb.velocity.normalized;
+        if (rb != null && rb.linearVelocity.sqrMagnitude > 0.01f)
+            velDir = rb.linearVelocity.normalized;
         else
             velDir = other.transform.forward;
 

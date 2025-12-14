@@ -4,7 +4,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using UnityEngine;
 using UnityEngine.UI;
 
-public class TankDamage : MonoBehaviour
+public class TankDamage : MonoBehaviourPun
 {
     public Canvas hudCanvas; //Canvas 객체
     public Image hpBar; // 체력바 이미지
@@ -24,27 +24,53 @@ public class TankDamage : MonoBehaviour
         //탱크 폭발 시 생성시킬 폭발효과 로드
         expEffect = Resources.Load<GameObject>("Exploson10");
         hpBar.color = Color.green; // Filled 이미지 색상을 녹색으로..
+        ApplyHpUI();    //초기 UI 반영
     }
     // EnemyBullet에서 직접 호출할 수 있도록 공개 함수로 분리
     public void TakeDamage(int amount)
     {
-        
+        if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
 
+        // 중요: 소유자만 체력 변경 (여기서 동기화 갈림 방지)
+        if (PhotonNetwork.IsConnected && photonView != null && !photonView.IsMine)
+            return;
+
         currHp -= amount;
+        if (currHp < 0) currHp = 0;
 
-        hpBar.fillAmount = (float)currHp / (float)initHp;
-
-        if (hpBar.fillAmount <= 0.4f)
-            hpBar.color = Color.red;
-        else if (hpBar.fillAmount <= 0.6f)
-            hpBar.color = Color.yellow;
+        // 모든 클라이언트에게 HP/죽음 상태 동기화
+        photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
 
         if (currHp <= 0 && !isDead)
         {
             isDead = true;
-            StartCoroutine(ExplosionTank());
+            photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);  // 폭발/숨김은 모두 동일하게
+            StartCoroutine(ExplosionTankOwner());                   // 실제 파괴/부활 로직은 소유자만
         }
+    }
+    IEnumerator ExplosionTankOwner()
+    {
+        // Enemy면 소유자가 네트워크 파괴(지금 너 로직 유지)
+        if (CompareTag("Enemy"))
+        {
+            PhotonView pv = GetComponent<PhotonView>();
+            if (pv != null && PhotonNetwork.IsConnected && pv.IsMine)
+                PhotonNetwork.Destroy(gameObject);
+            else
+                Destroy(gameObject);
+
+            yield break;
+        }
+
+        float respawnDelay = GetRespawnDelay();
+        yield return new WaitForSeconds(respawnDelay);
+
+        // 부활(소유자만 HP 리셋) + 전원 동기화
+        currHp = initHp;
+        isDead = false;
+
+        photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp); // 이 안에서 HUD/렌더러도 복구됨
     }
     //pvp용 포탄 데미지 처리
     private void OnTriggerEnter(Collider other)
@@ -121,16 +147,6 @@ public class TankDamage : MonoBehaviour
 
         SetTankVisible(true);
     }
-    void SetTankVisible(bool isVisible)
-    {
-        //메쉬 렌더러를 활성/비활성화 하는 함수
-        if (renderers == null) return;
-
-        foreach (MeshRenderer _renderer in renderers)
-        {
-            _renderer.enabled = isVisible;
-        }
-    }
     float GetRespawnDelay()
     {
         GameMgr gm = FindObjectOfType<GameMgr>();
@@ -153,17 +169,57 @@ public class TankDamage : MonoBehaviour
     public void Heal(int amount)
     {
         if (amount <= 0) return;
-        if (currHp <= 0) return;
+        if (currHp <= 0 || isDead) return;
+
+        if (PhotonNetwork.IsConnected && photonView != null && !photonView.IsMine)
+            return;
 
         currHp = Mathf.Clamp(currHp + amount, 0, initHp);
+        photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
+    }
+    [PunRPC]
+    void RpcSyncHp(int newHp)
+    {
+        currHp = newHp;
+        ApplyHpUI();
 
-        if (hpBar != null)
+        // HP가 다시 생기면(부활) 원격에서도 보이게 복구
+        if (currHp > 0 && isDead)
         {
-            hpBar.fillAmount = (float)currHp / (float)initHp;
-
-            if (hpBar.fillAmount <= 0.4f) hpBar.color = Color.red;
-            else if (hpBar.fillAmount <= 0.6f) hpBar.color = Color.yellow;
-            else hpBar.color = Color.green;
+            isDead = false;
+            if (hudCanvas != null) hudCanvas.enabled = true;
+            SetTankVisible(true);
         }
+    }
+
+    [PunRPC]
+    void RpcDeathVisual()
+    {
+        // 죽음 연출은 모든 클라이언트 동일하게
+        if (expEffect != null)
+        {
+            GameObject effect = Instantiate(expEffect, transform.position, Quaternion.identity);
+            Destroy(effect, 3.0f);
+        }
+
+        if (hudCanvas != null) hudCanvas.enabled = false;
+        SetTankVisible(false);
+    }
+    //체력바 업데이트 해주는 함수
+    void ApplyHpUI()
+    {
+        if (hpBar == null) return;
+
+        hpBar.fillAmount = (float)currHp / (float)initHp;
+
+        if (hpBar.fillAmount <= 0.4f) hpBar.color = Color.red;
+        else if (hpBar.fillAmount <= 0.6f) hpBar.color = Color.yellow;
+        else hpBar.color = Color.green;
+    }
+    //플레이어가 죽으면 매쉬 랜더러 비활성화 하는 함수
+    void SetTankVisible(bool isVisible)
+    {
+        if (renderers == null) return;
+        foreach (var r in renderers) r.enabled = isVisible;
     }
 }

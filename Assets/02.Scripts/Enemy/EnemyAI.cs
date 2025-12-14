@@ -471,19 +471,35 @@ public class EnemyAI : MonoBehaviour
     {
         if (enemyData.bulletPrefab == null || firePoint == null) return;
 
-        // 포탄 생성
-        GameObject bulletObj = Instantiate(
-            enemyData.bulletPrefab,
-            firePoint.position,
-            firePoint.rotation
-        );
-
-        // EnemyBullet에 데미지 전달
-        EnemyBullet b = bulletObj.GetComponent<EnemyBullet>();
-        if (b != null)
+    #if PHOTON_UNITY_NETWORKING
+        // 멀티(룸)에서는 마스터만 네트워크로 발사
+        if (PhotonNetwork.InRoom)
         {
-            b.damage = enemyData.damage;   // EnemyData에 설정한 값 사용
+            if (!PhotonNetwork.IsMasterClient) return;
+
+            // Resources에 있는 프리팹 이름이 필요
+            // enemyData.bulletPrefab이 Resources 프리팹이면 이름으로 Instantiate 가능
+            string prefabName = enemyData.bulletPrefab.name;
+
+            GameObject bulletObj = PhotonNetwork.Instantiate(
+                prefabName,
+                firePoint.position,
+                firePoint.rotation
+            );
+
+            // 데미지 세팅 (모든 클라에서 동일해야 하므로 RPC로 세팅하거나 OnPhotonSerializeView 사용)
+            PhotonView bpv = bulletObj.GetComponent<PhotonView>();
+            if (bpv != null)
+                bpv.RPC(nameof(EnemyBullet.RpcInit), RpcTarget.AllBuffered, enemyData.damage);
+
+            return;
         }
+    #endif
+
+        // 싱글/오프라인
+        GameObject bulletLocal = Instantiate(enemyData.bulletPrefab, firePoint.position, firePoint.rotation);
+        EnemyBullet b = bulletLocal.GetComponent<EnemyBullet>();
+        if (b != null) b.damage = enemyData.damage;
     }
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================
