@@ -89,7 +89,9 @@ public class GameMgr : MonoBehaviourPunCallbacks
         }
 
         PhotonNetwork.IsMessageQueueRunning = true;
-        
+
+        if (txtWave != null)
+            txtWave.gameObject.SetActive(!isPvpMode);
     }
     IEnumerator Start()
     {
@@ -214,6 +216,10 @@ public class GameMgr : MonoBehaviourPunCallbacks
         if (isPvpMode)
         {
             btnStart.gameObject.SetActive(false);
+
+            if (txtWave != null)
+                txtWave.gameObject.SetActive(false);
+
             return;
         }
 
@@ -303,6 +309,8 @@ public class GameMgr : MonoBehaviourPunCallbacks
     }
     void UpdateWaveUI()
     {
+        if (isPvpMode) return;
+
         if (txtWave != null)
         {
             txtWave.text = $"Wave {currentWave}/{maxWave}";
@@ -380,6 +388,8 @@ public class GameMgr : MonoBehaviourPunCallbacks
     [PunRPC]
     void RpcSetWave(int wave, int max)
     {
+        if (isPvpMode) return;
+
         currentWave = wave;
         if (txtWave != null)
             txtWave.text = $"Wave {wave}/{max}";

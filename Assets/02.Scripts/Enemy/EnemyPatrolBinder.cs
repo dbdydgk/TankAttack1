@@ -4,48 +4,51 @@ using UnityEngine;
 [RequireComponent(typeof(PhotonView))]
 public class EnemyPatrolBinder : MonoBehaviour, IPunInstantiateMagicCallback
 {
-    public Transform[] patrolPoints;
+    public PatrolRoute currentRoute;
 
     public void OnPhotonInstantiate(PhotonMessageInfo info)
     {
-        int routeIndex = -1;
-
         object[] data = info.photonView.InstantiationData;
-        if (data != null && data.Length > 0 && data[0] is int i)
-            routeIndex = i;
 
-        ApplyRoute(routeIndex);
-    }
-
-    void ApplyRoute(int routeIndex)
-    {
-        if (routeIndex < 0)
-        {
-            Debug.LogWarning($"[EnemyPatrolBinder] routeIndex=-1 (InstantiationData 없음) / {name}", this);
-            return;
-        }
+        int routeIndex = -1;
+        if (data != null && data.Length > 0 && data[0] is int)
+            routeIndex = (int)data[0];
 
         GameMgr gm = FindFirstObjectByType<GameMgr>();
-        if (gm == null || gm.patrolRoutes == null || routeIndex >= gm.patrolRoutes.Length || gm.patrolRoutes[routeIndex] == null)
+        if (gm == null)
         {
-            Debug.LogWarning($"[EnemyPatrolBinder] 잘못된 routeIndex={routeIndex} / {name}", this);
+            Debug.LogWarning("[EnemyPatrolBinder] GameMgr not found");
             return;
         }
 
-        var points = gm.patrolRoutes[routeIndex].GetPoints();
+        if (gm.patrolRoutes == null || routeIndex < 0 || routeIndex >= gm.patrolRoutes.Length)
+        {
+            Debug.LogWarning($"[EnemyPatrolBinder] Invalid routeIndex={routeIndex}, routes={(gm.patrolRoutes == null ? 0 : gm.patrolRoutes.Length)}");
+            return;
+        }
+
+        currentRoute = gm.patrolRoutes[routeIndex];
+        if (currentRoute == null)
+        {
+            Debug.LogWarning("[EnemyPatrolBinder] currentRoute is null");
+            return;
+        }
+
+        Transform[] points = currentRoute.GetPoints();
         if (points == null || points.Length == 0)
         {
-            Debug.LogWarning($"[EnemyPatrolBinder] route에 포인트가 없음 idx={routeIndex} / {name}", this);
+            Debug.LogWarning($"[EnemyPatrolBinder] Route has no points: {currentRoute.name}");
             return;
         }
 
-        var ai = GetComponent<EnemyAI>();
-        if (ai != null)
+        EnemyAI ai = GetComponent<EnemyAI>();
+        if (ai == null)
         {
-            ai.SetPatrolPoints(points, randomStartIndex: false);
-            Debug.Log($"[EnemyPatrolBinder] 바인딩 성공 route={gm.patrolRoutes[routeIndex].name}, points={points.Length}, role={ai.enemyData?.role}", this);
+            Debug.LogWarning("[EnemyPatrolBinder] EnemyAI not found on same object");
+            return;
         }
 
-        patrolPoints = points;
+        ai.SetPatrolPoints(points); // 이게 핵심 (목적지까지 세팅됨)
+        Debug.Log($"[EnemyPatrolBinder] Applied route={currentRoute.name}, points={points.Length}, routeIndex={routeIndex}");
     }
 }
