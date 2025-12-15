@@ -75,6 +75,16 @@ public class GameMgr : MonoBehaviourPunCallbacks
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
+        #if PHOTON_UNITY_NETWORKING
+if (PhotonNetwork.IsMasterClient && PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom != null)
+{
+    var ht = new ExitGames.Client.Photon.Hashtable();
+    if (!PhotonNetwork.CurrentRoom.CustomProperties.ContainsKey("MAP"))
+        ht["MAP"] = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+
+    if (ht.Count > 0) PhotonNetwork.CurrentRoom.SetCustomProperties(ht);
+}
+#endif
         // 방 모드 읽기
         if (PhotonNetwork.CurrentRoom != null &&
             PhotonNetwork.CurrentRoom.CustomProperties != null &&
@@ -167,7 +177,7 @@ public class GameMgr : MonoBehaviourPunCallbacks
         }
 
         SetRoomBool(ROOMPROP_PVE_STARTED, true);
-        pv.RPC(nameof(RpcPveStarted), RpcTarget.AllBuffered);
+        pv.RPC(nameof(RpcPveStarted), RpcTarget.All);
 
         if (waveCo == null)
             waveCo = StartCoroutine(WaveRoutine());
@@ -454,6 +464,8 @@ public class GameMgr : MonoBehaviourPunCallbacks
     // =========================
     void CreateTank()
     {
+        PhotonNetwork.DestroyPlayerObjects(PhotonNetwork.LocalPlayer);
+
         Vector3 spawnPos;
         Quaternion spawnRot = Quaternion.identity;
 

@@ -33,7 +33,7 @@ public class PhotonInit : MonoBehaviourPunCallbacks
 
     private void Awake()
     {
-        PhotonNetwork.GameVersion = "v1.0";
+        PhotonNetwork.GameVersion = "1.0";
 
         //씬 동기화
         PhotonNetwork.AutomaticallySyncScene = true;

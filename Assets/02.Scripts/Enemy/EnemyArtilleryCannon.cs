@@ -85,7 +85,9 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
     // 신규: 착탄지점 기반 초기화
     [PunRPC]
-    public void RpcInitWithTarget(float newMax, float newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
+    public void RpcInitWithTarget(float newMax, float newMin, 
+        float newRadius, float newSpeed, float newLifeTime, 
+        Vector3 newTargetPoint, float newArcHeight)
     {
         maxDamage = newMax;
         minDamage = newMin;
@@ -152,7 +154,8 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
         StartCoroutine(AutoExplode());
     }
 
-    bool TryGetVelocityToHitPoint(Vector3 from, Vector3 to, float extraArcHeight, out Vector3 v0, out float flightTime)
+    bool TryGetVelocityToHitPoint(Vector3 from, Vector3 to, float extraArcHeight, 
+        out Vector3 v0, out float flightTime)
     {
         v0 = Vector3.zero;
         flightTime = 0f;

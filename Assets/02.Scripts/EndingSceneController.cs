@@ -1,7 +1,8 @@
-﻿using System;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using System.Collections;
+
 
 #if PHOTON_UNITY_NETWORKING
 using Photon.Pun;
@@ -12,26 +13,30 @@ using Hashtable = ExitGames.Client.Photon.Hashtable;
 public class EndingSceneController : MonoBehaviourPunCallbacks
 {
     [Header("UI (Legacy Text 기준)")]
-    public Text resultTxt;   // ResultTxt 연결
-    public Text waveTxt;     // WaveTxt 연결
+    public Text resultTxt;
+    public Text waveTxt;
 
     [Header("Buttons")]
-    public Button replayBtn; // ReplayBtn 연결
-    public Button lobbyBtn;  // LobbyBtn 연결
+    public Button replayBtn;
+    public Button lobbyBtn;
 
     [Header("Scene Names")]
-    public string endingSceneName = "Ending";
     public string lobbySceneName = "scLobby";
 
-    // 룸 커스텀 프로퍼티 키 (GameMgr에서 넣어줄 것)
+    [Header("Room Property Key (맵 이름 저장 키)")]
+    // 방 만들 때/게임씬 진입 때 저장해둔 맵 씬 이름 키
+    public string mapRoomPropertyKey = "MAP";
+
     const string KEY_END_RESULT = "END_RESULT"; // "CLEAR" or "FAIL"
-    const string KEY_END_WAVE = "END_WAVE";     // int
-    const string KEY_MAP = "MAP";               // PhotonInit에서 쓰는 맵 키
+    const string KEY_END_WAVE = "END_WAVE";   // int
+    const string KEY_PVE_STARTED = "PVE_STARTED";
+    const string KEY_READY = "READY";
 
     void Start()
     {
         ApplyEndingTexts();
         HookButtons();
+        RefreshReplayButton();
     }
 
     void HookButtons()
@@ -49,6 +54,14 @@ public class EndingSceneController : MonoBehaviourPunCallbacks
         }
     }
 
+    void RefreshReplayButton()
+    {
+#if PHOTON_UNITY_NETWORKING
+        if (replayBtn != null)
+            replayBtn.gameObject.SetActive(PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient);
+#endif
+    }
+
     void ApplyEndingTexts()
     {
 #if PHOTON_UNITY_NETWORKING
@@ -64,50 +77,81 @@ public class EndingSceneController : MonoBehaviourPunCallbacks
             if (room.CustomProperties.TryGetValue(KEY_END_WAVE, out object w) && w != null)
             {
                 if (w is int wi) endWave = wi;
-                else if (w is byte wb) endWave = wb;
-                else if (w is short ws) endWave = ws;
-                else if (w is long wl) endWave = (int)wl;
-                else if (w is float wf) endWave = Mathf.RoundToInt(wf);
-                else if (w is double wd) endWave = (int)System.Math.Round(wd);
-                else
-                {
-                    int.TryParse(w.ToString(), out endWave);
-                }
+                else int.TryParse(w.ToString(), out endWave);
             }
         }
 
         bool isClear = (result == "CLEAR");
-
-        if (resultTxt != null)
-            resultTxt.text = isClear ? "Mission Clear!" : "Mission Failed!";
-
-        if (waveTxt != null)
-            waveTxt.text = $"End Wave : {endWave}";
+        if (resultTxt != null) resultTxt.text = isClear ? "Mission Clear!" : "Mission Failed!";
+        if (waveTxt != null) waveTxt.text = $"End Wave : {endWave}";
 #else
-        // Photon 없는 상태(단독 테스트) 대비
         if (resultTxt != null) resultTxt.text = "Mission Clear!";
         if (waveTxt != null) waveTxt.text = "End Wave : 0";
 #endif
     }
 
+#if PHOTON_UNITY_NETWORKING
+    public override void OnMasterClientSwitched(Player newMasterClient)
+    {
+        RefreshReplayButton();
+    }
+#endif
+
     public void OnClickReplay()
     {
 #if PHOTON_UNITY_NETWORKING
-        string mapName = "scBattleField";
+        // 마스터만 재시작 가능
+        if (!PhotonNetwork.InRoom || !PhotonNetwork.IsMasterClient)
+            return;
 
-        if (PhotonNetwork.InRoom &&
-            PhotonNetwork.CurrentRoom != null &&
-            PhotonNetwork.CurrentRoom.CustomProperties != null &&
-            PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(KEY_MAP, out object v) &&
-            v != null)
+        // 방/프로퍼티 null 방어 (NullReference 방지)
+        var room = PhotonNetwork.CurrentRoom;
+        if (room == null || room.CustomProperties == null)
         {
-            mapName = v.ToString();
+            Debug.LogError("[Ending] CurrentRoom or CustomProperties is null.");
+            return;
         }
 
-        SceneManager.LoadScene(mapName);
-#else
-    SceneManager.LoadScene(endingSceneName);
+        // 맵 씬 이름 가져오기 (하드코딩 제거)
+        if (!TryGetRoomString(room, mapRoomPropertyKey, out string mapName))
+        {
+            Debug.LogError($"[Ending] Room CustomProperties에 '{mapRoomPropertyKey}' 맵 정보가 없습니다. (맵 재시작 불가)");
+            return;
+        }
+
+        // 다음 판을 위해 최소한의 룸 상태 초기화
+        room.SetCustomProperties(new Hashtable
+        {
+            { KEY_END_RESULT, "" },
+            { KEY_END_WAVE, 0 },
+            { KEY_PVE_STARTED, false }, // PVE라면 다시 Start/Ready 흐름으로
+        });
+
+        // 씬 동기화 로드 (반드시 LoadLevel)
+        StartCoroutine(CoReplayAfterReset(mapName));
 #endif
+    }
+    IEnumerator CoReplayAfterReset(string mapName)
+    {
+        // 프로퍼티/Destroy 요청을 최대한 빨리 보내기
+        PhotonNetwork.SendAllOutgoingCommands();
+
+        // 너무 길 필요 없음. 0.2초면 보통 충분
+        yield return new WaitForSeconds(0.2f);
+
+        PhotonNetwork.LoadLevel(mapName);
+    }
+    static bool TryGetRoomString(Room room, string key, out string value)
+    {
+        value = null;
+        if (room == null || room.CustomProperties == null) return false;
+
+        if (room.CustomProperties.TryGetValue(key, out object v) && v != null)
+        {
+            value = v.ToString();
+            return !string.IsNullOrEmpty(value);
+        }
+        return false;
     }
 
     public void OnClickLobby()
@@ -126,19 +170,6 @@ public class EndingSceneController : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         SceneManager.LoadScene(lobbySceneName);
-    }
-#endif
-
-#if PHOTON_UNITY_NETWORKING
-    public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
-    {
-        if (propertiesThatChanged == null) return;
-
-        if (propertiesThatChanged.ContainsKey("END_RESULT") ||
-            propertiesThatChanged.ContainsKey("END_WAVE"))
-        {
-            ApplyEndingTexts();
-        }
     }
 #endif
 }
