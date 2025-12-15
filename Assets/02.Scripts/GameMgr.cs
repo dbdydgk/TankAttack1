@@ -156,12 +156,18 @@ public class GameMgr : MonoBehaviourPunCallbacks
         {
             Transform sp = enemySpawnPoints[Random.Range(0, enemySpawnPoints.Length)];
             spawnPos = sp.position;
+
+            // 추가: 바닥으로 스냅
+            TrySnapToGround(ref spawnPos);
         }
         else
         {
             // 스폰 포인트를 안 넣어줬을 경우 임시 랜덤 위치
             float pos = Random.Range(-100.0f, 100.0f);
             spawnPos = new Vector3(pos, 20.0f, pos);
+
+            // 추가: 바닥으로 스냅
+            TrySnapToGround(ref spawnPos);
         }
 
         // 3) 적 탱크 네트워크 생성 (마스터 클라이언트만 호출해야 함)
@@ -311,5 +317,18 @@ public class GameMgr : MonoBehaviourPunCallbacks
         Vector3 fallback = new Vector3(c.x, c.y + 5f, c.z);
         Debug.LogWarning($"[PVP Spawn] failed all tries → fallback={fallback}");
         return fallback;
+    }
+    
+    bool TrySnapToGround(ref Vector3 pos)
+    {
+        // 위에서 아래로 쏴서 지면을 찾는다
+        Vector3 origin = pos + Vector3.up * raycastHeight;
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit,
+            raycastHeight * 2f, groundLayer, QueryTriggerInteraction.Ignore))
+        {
+            pos.y = hit.point.y + groundOffsetY; // 바닥에 살짝 띄우기
+            return true;
+        }
+        return false;
     }
 }
