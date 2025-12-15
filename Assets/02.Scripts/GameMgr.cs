@@ -1,9 +1,10 @@
-﻿using Photon.Pun;
+﻿using ExitGames.Client.Photon;
+using Photon.Pun;
 using Photon.Realtime;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using ExitGames.Client.Photon;
 using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 public class GameMgr : MonoBehaviourPunCallbacks
@@ -50,6 +51,9 @@ public class GameMgr : MonoBehaviourPunCallbacks
     public float raycastHeight = 200f;           // 위에서 아래로 Raycast 시작 높이
     public float groundOffsetY = 0.5f;           // 바닥에 살짝 띄우기
 
+    [Header("PVE 패트롤 경로들(씬 오브젝트)")]
+    public PatrolRoute[] patrolRoutes;
+
     public bool isPvpMode = false;  //현재 방의 모드(PVP인지 아닌지)
 
     int currentWave = 0;
@@ -64,8 +68,10 @@ public class GameMgr : MonoBehaviourPunCallbacks
     //PVE 모드 결과
     const string ROOMPROP_END_RESULT = "END_RESULT"; // "CLEAR" / "FAIL"
     const string ROOMPROP_END_WAVE = "END_WAVE";
-
-    
+    const string PLAYERPROP_READY = "READY";
+    // 로그 최대 줄 수
+    const int MAX_LOG_LINES = 12;
+    readonly Queue<string> _logLines = new Queue<string>();
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
@@ -102,6 +108,11 @@ public class GameMgr : MonoBehaviourPunCallbacks
         //if (!isPvpMode && PhotonNetwork.IsMasterClient)
         //    StartCoroutine(WaveRoutine());
 
+        if (!isPvpMode && !GetRoomBool(ROOMPROP_PVE_STARTED))
+        {
+            SetLocalReady(false);
+        }
+
         RefreshStartButtonUI();
 
         // 만약 “이미 시작된 방”에 늦게 들어온 경우: 마스터만 웨이브 코루틴 켜주기
@@ -115,17 +126,47 @@ public class GameMgr : MonoBehaviourPunCallbacks
     public void OnClickStartPve()
     {
         if (isPvpMode) return;
-        if (!PhotonNetwork.IsMasterClient) return;
 
-        if (GetRoomBool(ROOMPROP_PVE_STARTED))
-            return; // 중복 방지
+        // 이미 시작된 방이면 아무것도 안함
+        if (GetRoomBool(ROOMPROP_PVE_STARTED)) return;
+
+        // ===== 클라이언트: READY 토글 =====
+        if (!PhotonNetwork.IsMasterClient)
+        {
+            bool next = !GetPlayerReady(PhotonNetwork.LocalPlayer);
+            SetLocalReady(next);
+
+            if (pv != null)
+            {
+                pv.RPC("LogMsg", RpcTarget.All,
+                    $"[READY] {PlayerName(PhotonNetwork.LocalPlayer)} : {(next ? "READY" : "NOT READY")}");
+            }
+
+            RefreshStartButtonUI();
+            return;
+        }
+
+        // ===== 마스터: 모두 READY면 START =====
+        if (!AreAllNonMasterReady(out var notReady))
+        {
+            if (pv != null)
+            {
+                pv.RPC("LogMsg", RpcTarget.All,
+                    $"[PVE] 시작 불가 - READY 안한 사람: {BuildNameList(notReady)}");
+            }
+            RefreshStartButtonUI();
+            return;
+        }
+
+        if (pv != null)
+        {
+            pv.RPC("LogMsg", RpcTarget.All,
+                $"[PVE] 모두 READY 확인. {Mathf.CeilToInt(timeBeforeFirstWave)}초 후 시작합니다.");
+        }
 
         SetRoomBool(ROOMPROP_PVE_STARTED, true);
-
-        // 모두 버튼 숨김 (늦게 들어온 사람도 적용되게 AllBuffered)
         pv.RPC(nameof(RpcPveStarted), RpcTarget.AllBuffered);
 
-        // 웨이브는 마스터만 시작
         if (waveCo == null)
             waveCo = StartCoroutine(WaveRoutine());
     }
@@ -169,7 +210,7 @@ public class GameMgr : MonoBehaviourPunCallbacks
     {
         if (btnStart == null) return;
 
-        // PVP면 아예 숨김
+        // PVP면 숨김
         if (isPvpMode)
         {
             btnStart.gameObject.SetActive(false);
@@ -178,6 +219,7 @@ public class GameMgr : MonoBehaviourPunCallbacks
 
         pveStarted = GetRoomBool(ROOMPROP_PVE_STARTED);
 
+        // 이미 시작됨 -> 숨김
         if (pveStarted)
         {
             btnStart.gameObject.SetActive(false);
@@ -186,21 +228,51 @@ public class GameMgr : MonoBehaviourPunCallbacks
             return;
         }
 
-        // PVE 대기 상태: 버튼은 보이되, 방장만 누를 수 있게
         btnStart.gameObject.SetActive(true);
-        btnStart.interactable = PhotonNetwork.IsMasterClient;
 
-        if (txtWave != null)
-            txtWave.text = "Waiting... (Host press START)";
+        // 버튼 라벨
+        var label = btnStart.GetComponentInChildren<UnityEngine.UI.Text>();
+
+        if (PhotonNetwork.IsMasterClient)
+        {
+            if (label != null) label.text = "START";
+
+            bool allReady = AreAllNonMasterReady(out var notReady);
+            btnStart.interactable = allReady;
+
+            if (txtWave != null)
+                txtWave.text = allReady ? "All READY. (Host press START)" : "Waiting... (Players press READY)";
+        }
+        else
+        {
+            bool ready = GetPlayerReady(PhotonNetwork.LocalPlayer);
+            if (label != null) label.text = ready ? "UNREADY" : "READY";
+
+            btnStart.interactable = true;
+
+            if (txtWave != null)
+                txtWave.text = "Waiting... (Press READY)";
+        }
     }
     // =========================
     //  PVE: 웨이브 & 적 스폰
     // =========================
     System.Collections.IEnumerator WaveRoutine()
     {
-        // 첫 웨이브 시작 전 대기
-        yield return new WaitForSeconds(timeBeforeFirstWave);
+        int t = Mathf.CeilToInt(timeBeforeFirstWave);
+        while (t > 0)
+        {
+            //if (pv != null)
+            //    pv.RPC("LogMsg", RpcTarget.AllBuffered, $"[PVE] Starting in {t}...");
+            //yield return new WaitForSeconds(1f);
+            //t--;
+            // 로그 대신 상단 상태 텍스트로 표시
+            if (txtWave != null)
+                txtWave.text = $"[PVE] Starting in {t}...";
 
+            yield return new WaitForSeconds(1f);
+            t--;
+        }
         while (currentWave < maxWave)
         {
             currentWave++;
@@ -289,9 +361,17 @@ public class GameMgr : MonoBehaviourPunCallbacks
             TrySnapToGround(ref spawnPos);
         }
 
-        // 3) 적 탱크 네트워크 생성 (마스터 클라이언트만 호출해야 함)
-        PhotonNetwork.Instantiate(enemyName, spawnPos, Quaternion.identity, 0);
+        int routeIndex = PickRouteIndex(); // 0 ~ patrolRoutes.Length-1, 없으면 -1
+        object[] instData = new object[] { routeIndex };
+
+        PhotonNetwork.Instantiate(enemyName, spawnPos, Quaternion.identity, 0, instData);
     }
+    int PickRouteIndex()
+    {
+        if (patrolRoutes == null || patrolRoutes.Length == 0) return -1;
+        return Random.Range(0, patrolRoutes.Length);
+    }
+
     bool AreEnemiesAlive()
     {
         var enemies = GameObject.FindGameObjectsWithTag(enemyTag);
@@ -310,7 +390,24 @@ public class GameMgr : MonoBehaviourPunCallbacks
     [PunRPC]
     void LogMsg(string msg)
     {
-        txtLogmsg.text = txtLogmsg.text+msg;
+        if (txtLogmsg == null || string.IsNullOrEmpty(msg)) return;
+
+        // 메시지 정규화 (앞/뒤 줄바꿈 정리)
+        msg = msg.Replace("\r", "").Trim('\n');
+
+        // 여러 줄 들어오면 줄 단위로 처리
+        var lines = msg.Split('\n');
+        foreach (var line in lines)
+        {
+            var s = line.TrimEnd();
+            if (string.IsNullOrWhiteSpace(s)) continue;
+
+            _logLines.Enqueue(s);
+            while (_logLines.Count > MAX_LOG_LINES)
+                _logLines.Dequeue();
+        }
+
+        txtLogmsg.text = string.Join("\n", _logLines);
     }
     void GetConnectPlayerCount() //룸 접속자 수 표시 함수
     {
@@ -325,10 +422,12 @@ public class GameMgr : MonoBehaviourPunCallbacks
     public override void OnPlayerEnteredRoom(Player newPlayer) //새로운 플레이어가 룸에 접속했을 때
     {
         GetConnectPlayerCount();
+        RefreshStartButtonUI();
     }
     public override void OnPlayerLeftRoom(Player otherPlayer) //플레이어가 룸에서 나갔을 때
     {
         GetConnectPlayerCount();
+        RefreshStartButtonUI();
     }
     public void OnClickExitRoom()
     {
@@ -504,4 +603,53 @@ public class GameMgr : MonoBehaviourPunCallbacks
         yield return new WaitForSeconds(0.2f);
         PhotonNetwork.LoadLevel("Ending");
     }
+
+    bool GetPlayerReady(Player p)
+    {
+        if (p == null || p.CustomProperties == null) return false;
+        return p.CustomProperties.TryGetValue(PLAYERPROP_READY, out object v) && v is bool b && b;
+    }
+
+    void SetLocalReady(bool ready)
+    {
+        var ht = new ExitGames.Client.Photon.Hashtable { { PLAYERPROP_READY, ready } };
+        PhotonNetwork.LocalPlayer.SetCustomProperties(ht);
+    }
+
+    string PlayerName(Player p)
+    {
+        if (p == null) return "Unknown";
+        return string.IsNullOrEmpty(p.NickName) ? $"Player{p.ActorNumber}" : p.NickName;
+    }
+
+    bool AreAllNonMasterReady(out List<Player> notReady)
+    {
+        notReady = new List<Player>();
+        foreach (var p in PhotonNetwork.PlayerList)
+        {
+            if (p == PhotonNetwork.MasterClient) continue;   // 방장은 제외
+            if (!GetPlayerReady(p)) notReady.Add(p);
+        }
+        return notReady.Count == 0;
+    }
+
+    string BuildNameList(List<Player> list)
+    {
+        if (list == null || list.Count == 0) return "";
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            sb.Append(PlayerName(list[i]));
+        }
+        return sb.ToString();
+    }
+    public override void OnPlayerPropertiesUpdate(Player targetPlayer, ExitGames.Client.Photon.Hashtable changedProps)
+    {
+        if (changedProps != null && changedProps.ContainsKey(PLAYERPROP_READY))
+        {
+            RefreshStartButtonUI();
+        }
+    }
+
 }

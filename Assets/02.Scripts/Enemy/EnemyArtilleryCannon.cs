@@ -37,6 +37,15 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
     public float armDelay = 0.15f;   // 발사 직후 이 시간 동안은 충돌로 폭발 금지
     private float armUntil = 0f;
 
+    [Header("디버그용 설정")]
+    [SerializeField] bool debugDrawRadius = true;
+    Vector3 lastExplodePos;
+    bool hasExplodePos;
+
+    [Header("사운드")]
+    public AudioClip explodeSfx;
+    [Range(0f, 1f)] public float explodeSfxVolume = 1f;
+    public float explodeSfxMaxDistance = 80f;
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -208,6 +217,8 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
         }
 
         Vector3 pos = transform.position;
+        lastExplodePos = pos;
+        hasExplodePos = true;
 
         if (PhotonNetwork.IsConnected)
         {
@@ -264,5 +275,30 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
             GameObject fx = Instantiate(expEffect, pos, Quaternion.identity);
             Destroy(fx, 2f);
         }
+
+        if (explodeSfx != null)
+        {
+            GameObject sfxObj = new GameObject("ArtilleryExplodeSFX");
+            sfxObj.transform.position = pos;
+
+            var a = sfxObj.AddComponent<AudioSource>();
+            a.spatialBlend = 1f;          // 3D 사운드
+            a.rolloffMode = AudioRolloffMode.Linear;
+            a.maxDistance = explodeSfxMaxDistance;
+            a.volume = explodeSfxVolume;
+            a.PlayOneShot(explodeSfx);
+
+            Destroy(sfxObj, explodeSfx.length + 0.2f);
+        }
+    }
+    void OnDrawGizmos()
+    {
+        if (!debugDrawRadius) return;
+
+        Gizmos.color = new Color(1f, 0f, 0f, 0.25f);
+
+        // 플레이 중엔 lastExplodePos, 아니면 현재 위치 기준으로 표시
+        Vector3 p = (Application.isPlaying && hasExplodePos) ? lastExplodePos : transform.position;
+        Gizmos.DrawWireSphere(p, splashRadius);
     }
 }

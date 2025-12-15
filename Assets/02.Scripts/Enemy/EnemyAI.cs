@@ -605,4 +605,36 @@ public class EnemyAI : MonoBehaviour
         incomingLookDir = (-projectileVelocityDir).normalized;
         incomingLookTimer = incomingLookDuration;
     }
+    public void SetPatrolPoints(Transform[] points, bool randomStartIndex = true)
+    {
+        patrolPoints = points;
+
+        if (patrolPoints == null || patrolPoints.Length == 0)
+            return;
+
+        currentPatrolIndex = randomStartIndex ? Random.Range(0, patrolPoints.Length) : 0;
+
+        // 곡사포는 이동 안 하니까 제외
+        if (enemyData != null && enemyData.role == EnemyRole.Artillery)
+            return;
+
+        if (agent != null && agent.enabled)
+        {
+            agent.SetDestination(patrolPoints[currentPatrolIndex].position);
+            currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
+        }
+    }
+    public void SetPatrolPoints(Transform[] points)
+    {
+        patrolPoints = points;
+
+        if (enemyData == null) return;
+        if (enemyData.role == EnemyRole.Artillery) return;
+        if (agent == null) agent = GetComponent<NavMeshAgent>();
+        if (agent == null || !agent.enabled) return;
+        if (patrolPoints == null || patrolPoints.Length == 0) return;
+
+        currentPatrolIndex = 0;
+        agent.SetDestination(patrolPoints[currentPatrolIndex].position);
+    }
 }

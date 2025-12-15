@@ -142,7 +142,7 @@ public class TankDamage : MonoBehaviourPun
         {
             isDead = true;
             photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);
-            StartCoroutine(ExplosionTankOwner()); // 너 기존 로직 유지
+            StartCoroutine(ExplosionTankOwner());
         }
     }
     // 기존 ApplyDamageAsMaster를 “공격자”까지 받게 오버로드/수정
