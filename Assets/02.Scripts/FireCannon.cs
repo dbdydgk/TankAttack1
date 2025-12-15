@@ -1,38 +1,64 @@
-using Photon.Pun;
+ï»¿using Photon.Pun;
+using Photon.Pun.Demo.Asteroids;
 using UnityEngine;
 
 public class FireCannon : MonoBehaviour
 {
-    private GameObject cannon = null;
+    [Header("ì´ íƒ±í¬ì´ ë°œì‚¬í•˜ëŠ” í¬íƒ„ í”„ë¦¬í© ì„¤ì •")]
+    public GameObject cannon = null;
     public Transform firePos;
     AudioClip fireSfx = null;
     AudioSource sfx = null;
-    PhotonView pv = null; //Æ÷Åæºä ÄÄÆ÷³ÍÆ®
+    PhotonView pv = null; //í¬í†¤ë·° ì»´í¬ë„ŒíŠ¸
     float lastFireTime = 0f;
+    [Header("ì´ íƒ±í¬ì˜ ë°œì‚¬ì†ë„ ì„¤ì •")]
+    public float fireInterval = 1.0f;      //íƒ±í¬ì˜ ë°œì‚¬ì†ë„
+
+    [Header("ì´ íƒ±í¬ì˜ í¬íƒ„ ë°ë¯¸ì§€ ì„¤ì •")]
+    public float cannonDamage = 20f;   //íƒ±í¬ ì¢…ë¥˜ë³„ í¬íƒ„ ë°ë¯¸ì§€
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
-        //Cannon ÇÁ¸®ÆÕÀ»  ResourcesÆú´õ¿¡¼­ ºÒ·¯¿Í ·Îµå
-        cannon = (GameObject)Resources.Load("Cannon");
+        //Cannon í”„ë¦¬íŒ¹ì„  Resourcesí´ë”ì—ì„œ ë¶ˆëŸ¬ì™€ ë¡œë“œ
+        //cannon = (GameObject)Resources.Load("Cannon");
         fireSfx = Resources.Load<AudioClip>("CannonFire");
         sfx = GetComponent<AudioSource>();
-        pv = GetComponent<PhotonView>();//Æ÷Åæºä ÄÄÆ÷³ÍÆ® ÇÒ´ç
+        pv = GetComponent<PhotonView>();//í¬í†¤ë·° ì»´í¬ë„ŒíŠ¸ í• ë‹¹
     }
     // Update is called once per frame
     void Update()
     {
         if (pv.IsMine && Input.GetMouseButtonDown(0) &&
-            Time.time > lastFireTime + 1.0f)
+            Time.time > lastFireTime + fireInterval)
         {
             lastFireTime = Time.time;
-            Fire(); //¸¶¿ì½º ¿ŞÂÊ ¹öÆ° ´©¸£¸é cannon ÇÁ¸®ÆÕ »ı¼º
+            Fire(); //ë§ˆìš°ìŠ¤ ì™¼ìª½ ë²„íŠ¼ ëˆ„ë¥´ë©´ cannon í”„ë¦¬íŒ¹ ìƒì„±
             pv.RPC("Fire", RpcTarget.Others, null);
         }
     }
     [PunRPC]
     void Fire()
     {
-        sfx.PlayOneShot(fireSfx, 1.0f);// ¹ß»ç »ç¿îµå Àç»ı
-        Instantiate(cannon, firePos.position, firePos.rotation);
+        sfx.PlayOneShot(fireSfx, 1.0f);// ë°œì‚¬ ì‚¬ìš´ë“œ ì¬ìƒ
+        GameObject obj = Instantiate(cannon, firePos.position, firePos.rotation);
+
+        Cannon cn = obj.GetComponent<Cannon>();
+        if (cn != null)
+        {
+            cn.InitOwner(transform.root.gameObject);
+
+            // ì´ ë°œì‚¬ë¥¼ ì‹¤í–‰í•œ "íƒ±í¬(ë„¤íŠ¸ì›Œí¬ ì˜¤ë¸Œì íŠ¸)"ì˜ ì†Œìœ ì = ìœ ì‚¬ëŒ
+            cn.ownerActorNumber = pv.OwnerActorNr;
+
+            // TankDamageê°€ Cannon.damageë¥¼ ì½ìŒ
+            cn.damage = cannonDamage;
+        }
+
+        //obj.GetComponent<Cannon>()?.InitOwner(transform.root.gameObject); // ë˜ëŠ” this.gameObject(íƒ±í¬ ë£¨íŠ¸)
+
+        //CannonDamage cd = obj.GetComponent<CannonDamage>();
+        //if (cd != null)
+        //    cd.damage = cannonDamage;
     }
 }

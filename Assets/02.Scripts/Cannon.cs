@@ -1,34 +1,102 @@
-using System.Collections;
+ï»¿using System.Collections;
 using UnityEngine;
+#if PHOTON_UNITY_NETWORKING
+using Photon.Pun;
+#endif
 
 public class Cannon : MonoBehaviour
 {
-    public GameObject expEffect; //Æø¹ß È¿°ú ÇÁ¸®ÆÕ
+    public GameObject expEffect; //í­ë°œ íš¨ê³¼ í”„ë¦¬íŒ¹
     private CapsuleCollider _collider;
     private Rigidbody _ridbody;
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    public float damage = 20f; //í¬íƒ„ì˜ ë°ë¯¸ì§€
+
+    [Header("ìê¸° ëª¸í†µ ì¶©ëŒ ë°©ì§€")]
+    public float ignoreOwnerCollisionTime = 0.25f;
+
+    private Collider[] _ownerCols;
+    private bool _exploding = false;
+
+    public int ownerActorNumber = -1;
     void Start()
     {
         _collider = GetComponent<CapsuleCollider>();
         _ridbody = GetComponent<Rigidbody>();
         GetComponent<Rigidbody>().AddForce(transform.forward * 6000.0f);
-        //Æ÷ÅºÀÌ ¹ß»çµÈ ÈÄ 3ÃÊ°¡ Áö³ª¸é Æø¹ß ÀÌÆåÆ® ÈÄ ÆÄ±«
+        //í¬íƒ„ì´ ë°œì‚¬ëœ í›„ 3ì´ˆê°€ ì§€ë‚˜ë©´ í­ë°œ ì´í™íŠ¸ í›„ íŒŒê´´
         StartCoroutine(this.ExplosionCannon(3.0f));
     }
     private void OnTriggerEnter(Collider other)
     {
-        //´ë»óÀÌ ´©±¸µç ºÎµúÈ÷¸é ÆÄ±«
-        StartCoroutine(this.ExplosionCannon(0.0f));
+        //í”Œë ˆì´ì–´ ìŠ¤í° ì˜ì—­, ì ì˜ íƒì§€ì˜ì—­, ì•„ì´í…œ ì½œë¦¬ë”ëŠ” ì œì™¸
+        if (other.CompareTag("SpawnArea")) return;
+        if (other.CompareTag("EnemySensor")) return;
+        if (other.CompareTag("Item")) return;
+
+        // ì•ˆì „ì¥ì¹˜: í˜¹ì‹œ IgnoreCollision íƒ€ì´ë° ì „ì— ë“¤ì–´ì˜¤ë©´ ë°œì‚¬ì ì½œë¼ì´ë”ëŠ” ë¬´ì‹œ
+        if (_ownerCols != null)
+        {
+            for (int i = 0; i < _ownerCols.Length; i++)
+            {
+                if (_ownerCols[i] == other) return;
+            }
+        }
+
+        ExplodeNow();
+    }
+    void ExplodeNow()
+    {
+        if (_exploding) return;
+        _exploding = true;
+        StartCoroutine(ExplosionCannon(0.0f));
     }
     IEnumerator ExplosionCannon(float tm)
     {
         yield return new WaitForSeconds(tm);
-        _collider.enabled = false; // ´õÀÌ»ó Ãæµ¹ÀÌ ¾ÈµÇ°Ô Äİ¶óÀÌ´õ ºñÈ°¼ºÈ­  
+        _collider.enabled = false; // ë”ì´ìƒ ì¶©ëŒì´ ì•ˆë˜ê²Œ ì½œë¼ì´ë” ë¹„í™œì„±í™”  
         _ridbody.isKinematic = true;
-        //Æø¹ß È¿°ú »ı¼º
+        //í­ë°œ íš¨ê³¼ ìƒì„±
         GameObject obj = (GameObject)Instantiate(expEffect,transform.position,
             Quaternion.identity);
-        Destroy(obj, 1.0f); //Æø¹ßÈ¿°ú ÆÄ±«
-        Destroy(this.gameObject, 1.0f); //Æ÷Åº ÆÄ±«
+        Destroy(obj, 1.0f); //í­ë°œíš¨ê³¼ íŒŒê´´
+        Destroy(this.gameObject, 1.0f); //í¬íƒ„ íŒŒê´´
     }
+    // ë°œì‚¬ ì§í›„ í˜¸ì¶œí•´ì„œ "ë°œì‚¬ì" ì½œë¼ì´ë”ë¥¼ ì ê¹ ë¬´ì‹œ
+    public void InitOwner(GameObject owner)
+    {
+        if (owner == null) return;
+
+        Collider myCol = GetComponent<Collider>();
+        _ownerCols = owner.GetComponentsInChildren<Collider>(true);
+
+        foreach (var c in _ownerCols)
+        {
+            if (c == null || c.isTrigger) continue;
+            Physics.IgnoreCollision(myCol, c, true);
+        }
+
+        // ì¼ì • ì‹œê°„ í›„ ë‹¤ì‹œ ì¶©ëŒ í—ˆìš©(ì›í•˜ë©´ ì´ ì½”ë£¨í‹´ ì œê±°í•´ì„œ ì˜êµ¬ ë¬´ì‹œë„ ê°€ëŠ¥)
+        StartCoroutine(ReenableOwnerCollision(myCol, _ownerCols, ignoreOwnerCollisionTime));
+    }
+
+    IEnumerator ReenableOwnerCollision(Collider myCol, Collider[] ownerCols, float t)
+    {
+        yield return new WaitForSeconds(t);
+
+        if (myCol == null || ownerCols == null) yield break;
+
+        foreach (var c in ownerCols)
+        {
+            if (c == null || c.isTrigger) continue;
+            Physics.IgnoreCollision(myCol, c, false);
+        }
+    }
+
+#if PHOTON_UNITY_NETWORKING
+    [PunRPC]
+    public void RpcInitOwnerActor(int actorNumber)
+    {
+        ownerActorNumber = actorNumber;
+    }
+#endif
 }

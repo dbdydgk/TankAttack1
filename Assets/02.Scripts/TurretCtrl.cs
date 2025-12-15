@@ -1,4 +1,4 @@
-using Photon.Pun;
+ï»¿using Photon.Pun;
 using UnityEngine;
 
 public class TurretCtrl : MonoBehaviourPun, IPunObservable
@@ -6,17 +6,21 @@ public class TurretCtrl : MonoBehaviourPun, IPunObservable
     private Transform tr;
     private RaycastHit hit;
     public float rotSpeed = 5.0f;
-    PhotonView pv = null; // Æ÷Åæºä ÄÄÆ÷³ÍÆ® º¯¼ö
-    Quaternion currRot = Quaternion.identity; //¿ø°İ ÅÊÅ© È¸Àü °ª
+
+    [Header("ì¡°ì¤€ ê°€ëŠ¥í•œ ë°”ë‹¥ ë ˆì´ì–´")]
+    public LayerMask aimGroundMask; 
+
+    PhotonView pv = null; // í¬í†¤ë·° ì»´í¬ë„ŒíŠ¸ ë³€ìˆ˜
+    Quaternion currRot = Quaternion.identity; //ì›ê²© íƒ±í¬ íšŒì „ ê°’
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
         tr = GetComponent<Transform>();
         pv = GetComponent<PhotonView>();
-        //µ¥ÀÌÅÍ Àü¼Û Å¸ÀÔ ¹× µ¿±âÈ­ ¼Ó¼º ¼³Á¤
+        //ë°ì´í„° ì „ì†¡ íƒ€ì… ë° ë™ê¸°í™” ì†ì„± ì„¤ì •
         pv.ObservedComponents[0] = this;
         pv.Synchronization = ViewSynchronization.UnreliableOnChange;
-        currRot = tr.localRotation; //ÃÊ±â È¸Àü°ª ¼³Á¤
+        currRot = tr.localRotation; //ì´ˆê¸° íšŒì „ê°’ ì„¤ì •
     }
 
     // Update is called once per frame
@@ -24,22 +28,22 @@ public class TurretCtrl : MonoBehaviourPun, IPunObservable
     {
         if (pv.IsMine)
         {
-            //¸ŞÀÎ Ä«¸Ş¶ó¿¡¼­ ¸¶¿ì½º Ä¿¼­ÀÇ À§Ä¡·Î Ä³½ºÆÃµÇ´Â Ray¸¦ »ı¼º
+            //ë©”ì¸ ì¹´ë©”ë¼ì—ì„œ ë§ˆìš°ìŠ¤ ì»¤ì„œì˜ ìœ„ì¹˜ë¡œ ìºìŠ¤íŒ…ë˜ëŠ” Rayë¥¼ ìƒì„±
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             Debug.DrawRay(ray.origin, ray.direction * 100.0f, Color.green);
-            //·¹ÀÌ°¡ 8¹ø Â° ·¹ÀÌ¾î¿Í ºÎµúÇû´Ù¸é(TERRAIN)
-            if (Physics.Raycast(ray, out hit, Mathf.Infinity, 1 << 8))
+            //ë ˆì´ê°€ 8ë²ˆ ì§¸ ë ˆì´ì–´ì™€ ë¶€ë”ªí˜”ë‹¤ë©´(TERRAIN)
+            if (Physics.Raycast(ray, out hit, Mathf.Infinity, aimGroundMask, QueryTriggerInteraction.Ignore))
             {
-                //Ray¿¡ ¸ÂÀº À§Ä¡¸¦ ·ÎÄÃÁÂÇ¥·Î º¯È¯
+                //Rayì— ë§ì€ ìœ„ì¹˜ë¥¼ ë¡œì»¬ì¢Œí‘œë¡œ ë³€í™˜
                 Vector3 relative = tr.InverseTransformPoint(hit.point);
-                //¿ªÅºÁ¨Æ® ÇÔ¼ö·Î µÎ Á¡°£ °¢µµ¸¦ °è»ê
+                //ì—­íƒ„ì  íŠ¸ í•¨ìˆ˜ë¡œ ë‘ ì ê°„ ê°ë„ë¥¼ ê³„ì‚°
                 float angle = Mathf.Atan2(relative.x, relative.z) * Mathf.Rad2Deg;
-                //rotSpeed¿¡ ÁöÁ¤µÈ ¼Óµµ·Î È¸Àü
+                //rotSpeedì— ì§€ì •ëœ ì†ë„ë¡œ íšŒì „
                 tr.Rotate(0, angle * Time.deltaTime * rotSpeed, 0);
 
             }
         }
-        else //¿ø°İ ÅÊÅ©ÀÇ È¸Àü °ª 
+        else //ì›ê²© íƒ±í¬ì˜ íšŒì „ ê°’ 
         {
             tr.localRotation = Quaternion.Slerp(tr.localRotation,
                 currRot, Time.deltaTime * 3.0f);

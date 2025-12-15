@@ -1,6 +1,10 @@
 ﻿using UnityEngine;
 using UnityEngine.AI;
 
+#if PHOTON_UNITY_NETWORKING 
+using Photon.Pun;
+#endif
+
 public class EnemyAI : MonoBehaviour
 {
     [Header("데이터")]
@@ -10,6 +14,21 @@ public class EnemyAI : MonoBehaviour
     public NavMeshAgent agent;
     public Transform turret;
     public Transform firePoint;
+
+    [Header("포신 상하각(Pitch)")]
+    public Transform cannonPitch;      // 포신/캐논 피치용 트랜스폼 (Cannon 또는 FirePoint 부모)
+    public float pitchMin = -5f;
+    public float pitchMax = 25f;
+
+    [Header("탄도(포물선) 세팅")]
+    public float muzzleSpeed = 40f;    // 포탄 초기 속도(=포탄 스피드에 맞게)
+    public bool useBallisticAim = true;
+    public float aimOffsetY = 1.0f;    // 목표를 약간 위로 조준(탱크 중심부)
+
+    [Header("피격/탄 날아옴 반응")]
+    public float incomingLookDuration = 1.5f;
+    private float incomingLookTimer = 0f;
+    private Vector3 incomingLookDir = Vector3.forward;
 
     [Header("패트롤 경로 (기본/중전차용)")]
     public Transform[] patrolPoints;
@@ -22,19 +41,31 @@ public class EnemyAI : MonoBehaviour
     [Header("플레이어 놓쳤을 때 (기본/중전차용)")]
     public float losePlayerDelay = 3f;
 
+    [Header("곡사포 착탄 세팅")]
+    public float artilleryArcHeight = 6f;      // 낮추면 궤도 낮아짐
+    public float artilleryTargetYOffset = 0f;  // 필요하면 0~1 정도
+
     // 현재 추적 중인 플레이어
     private Transform target;
 
     private int currentPatrolIndex = 0;
     private float fireTimer = 0f;
     private float losePlayerTimer = 0f;
-    private int currentHP;
+    private float currentHP;
 
     private enum EnemyState { Patrol, Chase }
     private EnemyState state = EnemyState.Patrol;
-
     void Start()
     {
+    #if PHOTON_UNITY_NETWORKING
+            if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient)
+            {
+                // 비마스터는 AI 로직/Agent 끄고, 위치 동기화만 받게
+                if (agent != null) agent.enabled = false;
+                enabled = false;
+                return;
+            }
+    #endif
         if (agent == null)
             agent = GetComponent<NavMeshAgent>();
 
@@ -44,6 +75,12 @@ public class EnemyAI : MonoBehaviour
             enabled = false;
             return;
         }
+        //탄의 속도를 enemydata와 맞춰줌
+        if (enemyData != null && enemyData.bulletPrefab != null)
+        {
+            var eb = enemyData.bulletPrefab.GetComponent<EnemyBullet>();
+            if (eb != null) muzzleSpeed = eb.speed;
+        }
 
         // NavMeshAgent 기본 세팅
         agent.speed = enemyData.moveSpeed;
@@ -52,10 +89,10 @@ public class EnemyAI : MonoBehaviour
 
         currentHP = enemyData.maxHP;
 
-        // 기본/중전차는 패트롤 시작, 자주곡사포는 스폰 위치 유지
+        // 기본/중전차는 패트롤 시작
         if (enemyData.role == EnemyRole.Artillery)
         {
-            agent.SetDestination(transform.position); // 처음엔 제자리
+            if (agent!= null) agent.enabled = false; //곡사포는 이동 불가
         }
         else
         {
@@ -99,12 +136,139 @@ public class EnemyAI : MonoBehaviour
         }
 
         // 4) 포탑 회전 + 사격
+        RotateTurretYaw(canSee);
+        RotateCannonPitch(canSee);
         HandleShooting(canSee, dist);
-        RotateTurret(canSee);
+    }
+    void RotateTurretYaw(bool canSee)
+    {
+        if (turret == null) return;
+
+        // 1) 탄이 날아온 반응이 우선
+        if (incomingLookTimer > 0f)
+        {
+            incomingLookTimer -= Time.deltaTime;
+
+            Vector3 dir = incomingLookDir;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 0.01f) return;
+
+            Quaternion targetRot = Quaternion.LookRotation(dir);
+            turret.rotation = Quaternion.RotateTowards(
+                turret.rotation,
+                targetRot,
+                enemyData.rotationSpeed * Time.deltaTime
+            );
+            return;
+        }
+
+        // 2) 평소에는 타겟이 보일 때만 회전
+        if (!canSee || target == null) return;
+
+        Vector3 toTarget = target.position - turret.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude < 0.01f) return;
+
+        Quaternion lookRot = Quaternion.LookRotation(toTarget);
+        turret.rotation = Quaternion.RotateTowards(
+            turret.rotation,
+            lookRot,
+            enemyData.rotationSpeed * Time.deltaTime
+        );
+    }
+    void RotateCannonPitch(bool canSee)
+    {
+        if (cannonPitch == null || firePoint == null) return;
+
+        // 1) 탄 날아온 반응 중이면: 그냥 그 방향으로 "직접" 피치 맞추기(탄도 계산 X)
+        if (incomingLookTimer > 0f)
+        {
+            Vector3 dir = incomingLookDir.normalized;
+            ApplyPitchFromDirection(dir);
+            return;
+        }
+
+        // 2) 타겟 못 보면 피치 조정 안 함
+        if (!canSee || target == null) return;
+
+        Vector3 targetPos = target.position + Vector3.up * aimOffsetY;
+
+        if (useBallisticAim)
+        {
+            if (TryGetBallisticDirection(firePoint.position, targetPos, muzzleSpeed, out Vector3 ballisticDir))
+            {
+                ApplyPitchFromDirection(ballisticDir);
+            }
+            else
+            {
+                // 사거리/속도 조건 때문에 탄도 해가 없으면 그냥 직접 조준
+                Vector3 directDir = (targetPos - firePoint.position).normalized;
+                ApplyPitchFromDirection(directDir);
+            }
+        }
+        else
+        {
+            Vector3 directDir = (targetPos - firePoint.position).normalized;
+            ApplyPitchFromDirection(directDir);
+        }
     }
 
-    // ================ 타겟 갱신 (4인 협동용 핵심) ================
+    void ApplyPitchFromDirection(Vector3 worldDir)
+    {
+        // 캐논 로컬 기준으로 X축 회전(일반적으로 pitch = local X)
+        // firePoint의 forward가 worldDir을 향하도록 캐논 pitch만 조정
+        Quaternion worldLook = Quaternion.LookRotation(worldDir, Vector3.up);
 
+        // 캐논Pitch의 "부모 기준" 로컬 회전으로 변환
+        Transform parent = cannonPitch.parent;
+        Quaternion localLook = (parent != null)
+            ? Quaternion.Inverse(parent.rotation) * worldLook
+            : worldLook;
+
+        Vector3 euler = localLook.eulerAngles;
+
+        // Unity euler 0~360 보정 → -180~180
+        float pitch = euler.x;
+        if (pitch > 180f) pitch -= 360f;
+
+        pitch = Mathf.Clamp(pitch, pitchMin, pitchMax);
+
+        // pitch만 적용 (y/z는 기존 유지)
+        Vector3 current = cannonPitch.localEulerAngles;
+        float curX = current.x;
+        if (curX > 180f) curX -= 360f;
+
+        cannonPitch.localEulerAngles = new Vector3(pitch, current.y, current.z);
+    }
+
+    // 탄도 방향 계산(낮은 각도 우선)
+    bool TryGetBallisticDirection(Vector3 from, Vector3 to, float speed, out Vector3 dir)
+    {
+        dir = Vector3.forward;
+
+        Vector3 diff = to - from;
+        Vector3 diffXZ = new Vector3(diff.x, 0f, diff.z);
+        float x = diffXZ.magnitude;     // 수평 거리
+        float y = diff.y;               // 높이 차
+        float g = Mathf.Abs(Physics.gravity.y);
+
+        float v2 = speed * speed;
+        float v4 = v2 * v2;
+
+        float discriminant = v4 - g * (g * x * x + 2f * y * v2);
+        if (discriminant < 0f) return false;
+
+        float sqrt = Mathf.Sqrt(discriminant);
+
+        // 낮은 각도(직사에 가까운) 선택
+        float tan = (v2 - sqrt) / (g * x);
+        float angle = Mathf.Atan(tan); // rad
+
+        Vector3 flatDir = diffXZ.normalized;
+        dir = (flatDir * Mathf.Cos(angle) + Vector3.up * Mathf.Sin(angle)).normalized;
+        return true;
+    }
+    // ================ 타겟 갱신 (4인 협동용 핵심) ================
     void UpdateTarget()
     {
         // 태그 "Player"가 붙은 모든 탱크를 찾는다 (최대 4명)
@@ -122,6 +286,10 @@ public class EnemyAI : MonoBehaviour
         foreach (GameObject p in players)
         {
             if (!p.activeInHierarchy) continue; // 비활성 플레이어 무시
+
+            // 추가: 죽은 플레이어는 타겟에서 제외
+            TankDamage td = p.GetComponent<TankDamage>();
+            if (td != null && td.IsDead) continue;
 
             Vector3 diff = p.transform.position - pos;
             float dSq = diff.sqrMagnitude;
@@ -198,47 +366,48 @@ public class EnemyAI : MonoBehaviour
     }
 
     // ================ 자주곡사포 (거리 10~18m 유지) ================
-
+    // 곡사포 에셋이 없다...그래서 곡사포는 고정식으로 변경
     void UpdateArtillery(bool canSee, Vector3 toTarget, float dist)
     {
-        if (!canSee || target == null)
-        {
-            // 플레이어를 못 보면 스폰 위치 근처에서 대기
-            if (!agent.hasPath)
-                agent.SetDestination(transform.position);
-            return;
-        }
+        //if (!canSee || target == null)
+        //{
+        //    // 플레이어를 못 보면 스폰 위치 근처에서 대기
+        //    if (!agent.hasPath)
+        //        agent.SetDestination(transform.position);
+        //    return;
+        //}
 
-        Vector3 dir = toTarget.normalized;
+        //Vector3 dir = toTarget.normalized;
 
-        // 너무 가까우면 멀어지기
-        if (dist < enemyData.preferredMinDistance)
-        {
-            Vector3 targetPos = transform.position - dir * 5f;
-            MoveToNavmeshPoint(targetPos);
-        }
-        // 너무 멀면 조금 다가가기
-        else if (dist > enemyData.preferredMaxDistance)
-        {
-            Vector3 targetPos = transform.position + dir * 5f;
-            MoveToNavmeshPoint(targetPos);
-        }
-        else
-        {
-            // 적당한 거리면 제자리 유지
-            if (!agent.hasPath || agent.remainingDistance > 0.5f)
-                agent.SetDestination(transform.position);
-        }
+        //// 너무 가까우면 멀어지기
+        //if (dist < enemyData.preferredMinDistance)
+        //{
+        //    Vector3 targetPos = transform.position - dir * 5f;
+        //    MoveToNavmeshPoint(targetPos);
+        //}
+        //// 너무 멀면 조금 다가가기
+        //else if (dist > enemyData.preferredMaxDistance)
+        //{
+        //    Vector3 targetPos = transform.position + dir * 5f;
+        //    MoveToNavmeshPoint(targetPos);
+        //}
+        //else
+        //{
+        //    // 적당한 거리면 제자리 유지
+        //    if (!agent.hasPath || agent.remainingDistance > 0.5f)
+        //        agent.SetDestination(transform.position);
+        //}
+        return;
     }
-
-    void MoveToNavmeshPoint(Vector3 targetPos)
-    {
-        NavMeshHit hit;
-        if (NavMesh.SamplePosition(targetPos, out hit, 3f, NavMesh.AllAreas))
-        {
-            agent.SetDestination(hit.position);
-        }
-    }
+    //자주곡사포가 navmesh 안에서 이동할 수 있도록 하는 함수(사용 안함)
+    //void MoveToNavmeshPoint(Vector3 targetPos)
+    //{
+    //    NavMeshHit hit;
+    //    if (NavMesh.SamplePosition(targetPos, out hit, 3f, NavMesh.AllAreas))
+    //    {
+    //        agent.SetDestination(hit.position);
+    //    }
+    //}
 
     // ================ 시야 판정 ================
 
@@ -280,22 +449,22 @@ public class EnemyAI : MonoBehaviour
     }
 
     // ================ 포탑 회전 / 사격 ================
+    //이 함수는 포탑회전만 담당 -> 포탑회전과 포신 상하 각도를 제어하는 코드 추가.
+    //void RotateTurret(bool canSee)
+    //{
+    //    if (!canSee || turret == null || target == null) return;
 
-    void RotateTurret(bool canSee)
-    {
-        if (!canSee || turret == null || target == null) return;
+    //    Vector3 dir = target.position - turret.position;
+    //    dir.y = 0f;
+    //    if (dir.sqrMagnitude < 0.01f) return;
 
-        Vector3 dir = target.position - turret.position;
-        dir.y = 0f;
-        if (dir.sqrMagnitude < 0.01f) return;
-
-        Quaternion targetRot = Quaternion.LookRotation(dir);
-        turret.rotation = Quaternion.RotateTowards(
-            turret.rotation,
-            targetRot,
-            enemyData.rotationSpeed * Time.deltaTime
-        );
-    }
+    //    Quaternion targetRot = Quaternion.LookRotation(dir);
+    //    turret.rotation = Quaternion.RotateTowards(
+    //        turret.rotation,
+    //        targetRot,
+    //        enemyData.rotationSpeed * Time.deltaTime
+    //    );
+    //}
 
     void HandleShooting(bool canSee, float dist)
     {
@@ -309,29 +478,97 @@ public class EnemyAI : MonoBehaviour
 
     void Shoot()
     {
-        if (enemyData.bulletPrefab == null || firePoint == null) return;
+        if (enemyData == null || enemyData.bulletPrefab == null || firePoint == null) return;
 
-        // 포탄 생성
-        GameObject bulletObj = Instantiate(
-            enemyData.bulletPrefab,
-            firePoint.position,
-            firePoint.rotation
-        );
-
-        // EnemyBullet에 데미지 전달
-        EnemyBullet b = bulletObj.GetComponent<EnemyBullet>();
-        if (b != null)
+#if PHOTON_UNITY_NETWORKING
+        // 멀티(룸)에서는 마스터만 발사/생성
+        if (PhotonNetwork.InRoom)
         {
-            b.damage = enemyData.damage;   // EnemyData에 설정한 값 사용
+            if (!PhotonNetwork.IsMasterClient) return;
+
+            string prefabName = enemyData.bulletPrefab.name;
+
+            GameObject bulletObj = PhotonNetwork.Instantiate(prefabName, firePoint.position, firePoint.rotation);
+            PhotonView bpv = bulletObj.GetComponent<PhotonView>();
+
+            // 1) 곡사포탄 (EnemyArtilleryCannon)
+            EnemyArtilleryCannon art = bulletObj.GetComponent<EnemyArtilleryCannon>();
+            if (art != null)
+            {
+                float maxD = enemyData.damage;
+
+                // minDamage / splashRadius / lifeTime 은 프리팹 기본값을 사용
+                float minD = art.minDamage;
+                float radius = art.splashRadius;
+                float life = art.lifeTime;
+
+                // 속도는 EnemyAI의 muzzleSpeed를 사용
+                float spd = muzzleSpeed;
+
+                // 착탄지점 = 발사 순간 플레이어 위치
+                Vector3 impactPoint = (target != null)
+                    ? (target.position + Vector3.up * artilleryTargetYOffset)
+                    : (firePoint.position + firePoint.forward * 10f);
+
+                if (bpv != null)
+                    bpv.RPC(nameof(EnemyArtilleryCannon.RpcInitWithTarget),
+                            RpcTarget.All,
+                            maxD, minD, radius, spd, life,
+                            impactPoint, artilleryArcHeight);
+
+                return;
+            }
+
+            // 2) 직사포탄 (EnemyBullet)
+            EnemyBullet b = bulletObj.GetComponent<EnemyBullet>();
+            if (b != null)
+            {
+                // owner(마스터)가 Start에서 linearVelocity를 세팅하므로,
+                // Start 실행 전에 speed를 먼저 넣어주면 됨.
+                b.speed = muzzleSpeed;
+
+                if (bpv != null)
+                    bpv.RPC(nameof(EnemyBullet.RpcInit), RpcTarget.All, enemyData.damage);
+
+                return;
+            }
+
+            // 3) 둘 다 아니면 그냥 종료 (프리팹 세팅 문제)
+            return;
+        }
+#endif
+
+        // 싱글/오프라인
+        GameObject bulletLocal = Instantiate(enemyData.bulletPrefab, firePoint.position, firePoint.rotation);
+
+        EnemyArtilleryCannon artLocal = bulletLocal.GetComponent<EnemyArtilleryCannon>();
+        if (artLocal != null)
+        {
+            Vector3 impactPoint = (target != null)
+        ? (target.position + Vector3.up * artilleryTargetYOffset)
+        : (firePoint.position + firePoint.forward * 10f);
+
+            artLocal.InitWithTarget(enemyData.damage, artLocal.minDamage, artLocal.splashRadius,
+                                   muzzleSpeed, artLocal.lifeTime,
+                                   impactPoint, artilleryArcHeight);
+            return;
+        }
+
+        EnemyBullet bLocal = bulletLocal.GetComponent<EnemyBullet>();
+        if (bLocal != null)
+        {
+            bLocal.damage = enemyData.damage;
+            bLocal.speed = muzzleSpeed;
+            return;
         }
     }
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================
 
-    public void TakeDamage(int amount)
+    public void TakeDamage(float amount)
     {
         currentHP -= amount;
-        if (currentHP <= 0)
+        if (currentHP <= 0f)
         {
             Destroy(gameObject);
         }
@@ -360,5 +597,44 @@ public class EnemyAI : MonoBehaviour
         Gizmos.color = Color.cyan;
         Gizmos.DrawRay(transform.position, leftDir * enemyData.detectionRange);
         Gizmos.DrawRay(transform.position, rightDir * enemyData.detectionRange);
+    }
+    public void NotifyIncomingFire(Vector3 projectileVelocityDir)
+    {
+        // 포탄은 "발사자 -> 적" 방향으로 날아옴
+        // 발사자를 바라보려면 반대 방향을 봐야 함
+        incomingLookDir = (-projectileVelocityDir).normalized;
+        incomingLookTimer = incomingLookDuration;
+    }
+    public void SetPatrolPoints(Transform[] points, bool randomStartIndex = true)
+    {
+        patrolPoints = points;
+
+        if (patrolPoints == null || patrolPoints.Length == 0)
+            return;
+
+        currentPatrolIndex = randomStartIndex ? Random.Range(0, patrolPoints.Length) : 0;
+
+        // 곡사포는 이동 안 하니까 제외
+        if (enemyData != null && enemyData.role == EnemyRole.Artillery)
+            return;
+
+        if (agent != null && agent.enabled)
+        {
+            agent.SetDestination(patrolPoints[currentPatrolIndex].position);
+            currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
+        }
+    }
+    public void SetPatrolPoints(Transform[] points)
+    {
+        patrolPoints = points;
+
+        if (enemyData == null) return;
+        if (enemyData.role == EnemyRole.Artillery) return;
+        if (agent == null) agent = GetComponent<NavMeshAgent>();
+        if (agent == null || !agent.enabled) return;
+        if (patrolPoints == null || patrolPoints.Length == 0) return;
+
+        currentPatrolIndex = 0;
+        agent.SetDestination(patrolPoints[currentPatrolIndex].position);
     }
 }

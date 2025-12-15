@@ -23,8 +23,8 @@ public class EnemyData : ScriptableObject
     public float moveSpeed = 3f;        //이동속도
     public float rotationSpeed = 120f;  //회전 속도
     public float fireRate = 5f;         //초당 발사속도
-    public int damage = 10;
-    public int maxHP = 100;
+    public float damage = 10f;
+    public float maxHP = 100f;
     public float detectionRange = 80f;  // 플레이어 인식 거리
     public GameObject bulletPrefab;     // 발사할 탄환 프리팹
 
