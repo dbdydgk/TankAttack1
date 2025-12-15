@@ -146,7 +146,7 @@ public class SelectTankManager : MonoBehaviour
             tankNameTxt.text = tankName;
 
         // 2) 각 컴포넌트에서 스탯 가져오기
-        int hp = 0;
+        float hp = 0f;
         float damage = 0f;
         float moveSpeed = 0f;
         float fireInterval = 0f;

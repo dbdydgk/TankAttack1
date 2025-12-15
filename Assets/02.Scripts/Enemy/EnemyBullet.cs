@@ -6,7 +6,7 @@ using UnityEngine;
 public class EnemyBullet : MonoBehaviourPun
 {
     [Header("기본 설정")]
-    public int damage = 20;          // EnemyData에서 받아올 데미지
+    public float damage = 20;          // EnemyData에서 받아올 데미지
     public float speed = 60f;        // 발사 속도
     public float lifeTime = 3f;      // 자동 파괴 시간
     public GameObject expEffect;     // 폭발 이펙트 (있으면 사용)
@@ -115,7 +115,7 @@ public class EnemyBullet : MonoBehaviourPun
 
     // EnemyAI에서 데미지 세팅하려고 쓰는 초기화 RPC는 유지
     [PunRPC]
-    public void RpcInit(int newDamage)
+    public void RpcInit(float newDamage)
     {
         damage = newDamage;
     }

@@ -42,10 +42,23 @@ public class FireCannon : MonoBehaviour
     {
         sfx.PlayOneShot(fireSfx, 1.0f);// 발사 사운드 재생
         GameObject obj = Instantiate(cannon, firePos.position, firePos.rotation);
-        obj.GetComponent<Cannon>()?.InitOwner(transform.root.gameObject); // 또는 this.gameObject(탱크 루트)
 
-        CannonDamage cd = obj.GetComponent<CannonDamage>();
-        if (cd != null)
-            cd.damage = cannonDamage;
+        Cannon cn = obj.GetComponent<Cannon>();
+        if (cn != null)
+        {
+            cn.InitOwner(transform.root.gameObject);
+
+            // 이 발사를 실행한 "탱크(네트워크 오브젝트)"의 소유자 = 쏜 사람
+            cn.ownerActorNumber = pv.OwnerActorNr;
+
+            // TankDamage가 Cannon.damage를 읽음
+            cn.damage = cannonDamage;
+        }
+
+        //obj.GetComponent<Cannon>()?.InitOwner(transform.root.gameObject); // 또는 this.gameObject(탱크 루트)
+
+        //CannonDamage cd = obj.GetComponent<CannonDamage>();
+        //if (cd != null)
+        //    cd.damage = cannonDamage;
     }
 }

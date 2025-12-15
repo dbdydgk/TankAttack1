@@ -7,9 +7,9 @@ using UnityEngine;
 public class EnemyArtilleryCannon : MonoBehaviourPun
 {
     [Header("피해")]
-    public int maxDamage = 40;
-    public int minDamage = 15;
-    public float splashRadius = 6f;
+    public float maxDamage = 40f;
+    public float minDamage = 15f;
+    public float splashRadius = 30f;
 
     [Header("이동")]
     public float speed = 60f;   // (이제는 참고값)
@@ -60,7 +60,7 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
     // 기존 RPC 유지(호환용) - 그대로 둬도 됨
     [PunRPC]
-    public void RpcInit(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime)
+    public void RpcInit(float newMax, float newMin, float newRadius, float newSpeed, float newLifeTime)
     {
         maxDamage = newMax;
         minDamage = newMin;
@@ -76,7 +76,7 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
     // 신규: 착탄지점 기반 초기화
     [PunRPC]
-    public void RpcInitWithTarget(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
+    public void RpcInitWithTarget(float newMax, float newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
     {
         maxDamage = newMax;
         minDamage = newMin;
@@ -95,7 +95,7 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
     }
 
     // 오프라인에서 쓰기 편하게(선택)
-    public void InitWithTarget(int newMax, int newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
+    public void InitWithTarget(float newMax, float newMin, float newRadius, float newSpeed, float newLifeTime, Vector3 newTargetPoint, float newArcHeight)
     {
         maxDamage = newMax;
         minDamage = newMin;
@@ -251,8 +251,7 @@ public class EnemyArtilleryCannon : MonoBehaviourPun
 
             float d = Vector3.Distance(center, td.transform.position);
             float t = Mathf.Clamp01(1f - (d / splashRadius));
-            int dmg = Mathf.RoundToInt(Mathf.Lerp(minDamage, maxDamage, t));
-
+            float dmg = Mathf.Lerp(minDamage, maxDamage, t);
             td.TakeDamage(dmg);
         }
     }

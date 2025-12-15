@@ -51,7 +51,7 @@ public class EnemyAI : MonoBehaviour
     private int currentPatrolIndex = 0;
     private float fireTimer = 0f;
     private float losePlayerTimer = 0f;
-    private int currentHP;
+    private float currentHP;
 
     private enum EnemyState { Patrol, Chase }
     private EnemyState state = EnemyState.Patrol;
@@ -495,10 +495,10 @@ public class EnemyAI : MonoBehaviour
             EnemyArtilleryCannon art = bulletObj.GetComponent<EnemyArtilleryCannon>();
             if (art != null)
             {
-                int maxD = enemyData.damage;
+                float maxD = enemyData.damage;
 
                 // minDamage / splashRadius / lifeTime 은 프리팹 기본값을 사용
-                int minD = art.minDamage;
+                float minD = art.minDamage;
                 float radius = art.splashRadius;
                 float life = art.lifeTime;
 
@@ -565,10 +565,10 @@ public class EnemyAI : MonoBehaviour
 
     // ================ 데미지/사망 (아직 안 쓰고 있어도 됨) ================
 
-    public void TakeDamage(int amount)
+    public void TakeDamage(float amount)
     {
         currentHP -= amount;
-        if (currentHP <= 0)
+        if (currentHP <= 0f)
         {
             Destroy(gameObject);
         }

@@ -61,6 +61,11 @@ public class GameMgr : MonoBehaviourPunCallbacks
     bool pveStarted = false;
     Coroutine waveCo;
 
+    //PVE 모드 결과
+    const string ROOMPROP_END_RESULT = "END_RESULT"; // "CLEAR" / "FAIL"
+    const string ROOMPROP_END_WAVE = "END_WAVE";
+
+    
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
@@ -199,16 +204,30 @@ public class GameMgr : MonoBehaviourPunCallbacks
         while (currentWave < maxWave)
         {
             currentWave++;
-            UpdateWaveUI();
+
+            // 다른 클라 UI도 같이 갱신되게 (RpcSetWave 함수는 이미 있음) :contentReference[oaicite:9]{index=9}
+            if (pv != null)
+                pv.RPC(nameof(RpcSetWave), RpcTarget.AllBuffered, currentWave, maxWave);
 
             SpawnWave(currentWave);
 
-            yield return new UnityEngine.WaitUntil(() => !AreEnemiesAlive());
+            // 적이 살아있는 동안 계속 체크
+            while (AreEnemiesAlive())
+            {
+                // 5웨이브 이전에 모두 죽으면 실패 엔딩
+                if (!AreAnyPlayersAlive())
+                {
+                    EndGameToEnding(false);
+                    yield break;
+                }
+                yield return null;
+            }
 
             yield return new WaitForSeconds(timeBetweenWaves);
         }
 
-        // TODO: maxWave 도달 후 클리어 패널, 보스 웨이브 등 추가 가능
+        // 5웨이브 끝났을 때, 한 명이라도 살아있으면 클리어
+        EndGameToEnding(AreAnyPlayersAlive());
     }
     void UpdateWaveUI()
     {
@@ -451,5 +470,38 @@ public class GameMgr : MonoBehaviourPunCallbacks
                     waveCo = StartCoroutine(WaveRoutine());
             }
         }
+    }
+    bool AreAnyPlayersAlive()
+    {
+        var players = GameObject.FindGameObjectsWithTag("Player");
+        if (players == null || players.Length == 0) return false;
+
+        foreach (var go in players)
+        {
+            var td = go.GetComponentInParent<TankDamage>();
+            if (td != null && td.IsAlive) return true;
+        }
+        return false;
+    }
+    //LoadLevel이 빨라 프로퍼티가 저장 안됨 => 될 때까지 기다렸다가 씬 로딩
+    void EndGameToEnding(bool isClear)
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+        if (PhotonNetwork.CurrentRoom == null) return;
+
+        var ht = new Hashtable
+    {
+        { ROOMPROP_END_RESULT, isClear ? "CLEAR" : "FAIL" },
+        { ROOMPROP_END_WAVE, currentWave }
+    };
+        PhotonNetwork.CurrentRoom.SetCustomProperties(ht);
+
+        StartCoroutine(CoLoadEndingAfterShortDelay());
+    }
+
+    IEnumerator CoLoadEndingAfterShortDelay()
+    {
+        yield return new WaitForSeconds(0.2f);
+        PhotonNetwork.LoadLevel("Ending");
     }
 }

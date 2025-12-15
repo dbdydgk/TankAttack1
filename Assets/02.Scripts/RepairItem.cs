@@ -4,7 +4,7 @@ using UnityEngine;
 public class RepairItem : MonoBehaviourPun
 {
     [Header("회복량")]
-    public int healAmount = 30;
+    public float healAmount = 30f;
 
     [Header("먹으면 사라지기")]
     public bool destroyOnPickup = true;

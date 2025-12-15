@@ -1,12 +1,15 @@
 ﻿using System.Collections;
 using UnityEngine;
+#if PHOTON_UNITY_NETWORKING
+using Photon.Pun;
+#endif
 
 public class Cannon : MonoBehaviour
 {
     public GameObject expEffect; //폭발 효과 프리팹
     private CapsuleCollider _collider;
     private Rigidbody _ridbody;
-    public int damage = 20; //포탄의 데미지
+    public float damage = 20f; //포탄의 데미지
 
     [Header("자기 몸통 충돌 방지")]
     public float ignoreOwnerCollisionTime = 0.25f;
@@ -14,6 +17,7 @@ public class Cannon : MonoBehaviour
     private Collider[] _ownerCols;
     private bool _exploding = false;
 
+    public int ownerActorNumber = -1;
     void Start()
     {
         _collider = GetComponent<CapsuleCollider>();
@@ -87,4 +91,12 @@ public class Cannon : MonoBehaviour
             Physics.IgnoreCollision(myCol, c, false);
         }
     }
+
+#if PHOTON_UNITY_NETWORKING
+    [PunRPC]
+    public void RpcInitOwnerActor(int actorNumber)
+    {
+        ownerActorNumber = actorNumber;
+    }
+#endif
 }

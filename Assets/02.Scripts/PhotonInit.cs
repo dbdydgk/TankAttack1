@@ -29,6 +29,8 @@ public class PhotonInit : MonoBehaviourPunCallbacks
     private string selectedMapName;
     public Dropdown mapDropdown;
 
+    private bool pendingJoinRandom = false;
+
     private void Awake()
     {
         PhotonNetwork.GameVersion = "v1.0";
@@ -77,7 +79,10 @@ public class PhotonInit : MonoBehaviourPunCallbacks
     {
         Debug.Log("Entered Lobby");
         userId.text = GetUserId();
-       // PhotonNetwork.JoinRandomRoom(); // 무작위 방 접속 시도
+        // PhotonNetwork.JoinRandomRoom(); // 무작위 방 접속 시도
+        if (pendingJoinRandom)
+            TryJoinRandom();
+
     }
     string GetUserId() //로컬에 저장된 플레이어 이름을 반환 또는 생성하는 함수
     {
@@ -103,12 +108,36 @@ public class PhotonInit : MonoBehaviourPunCallbacks
     //무작위 방접속 시도에 실패했을 때
     public override void OnJoinRandomFailed(short returnCode, string message)
     {
-        Debug.Log("No rooms!!");
-        //방 만들기
-        PhotonNetwork.CreateRoom("My Room", new RoomOptions { MaxPlayers = 20 });
+        pendingJoinRandom = false;
+        Debug.Log($"JoinRandomFailed: {returnCode} / {message}");
+
+        // 랜덤 버튼은 PVE 방을 만든다(고정)
+        bool isPvp = false;
+
+        string autoRoomName = "Room_" + Random.Range(0, 999).ToString("000");
+        autoRoomName = isPvp ? "[PVP]" + autoRoomName : "[PVE]" + autoRoomName;
+
+        RoomOptions roomOptions = new RoomOptions
+        {
+            IsOpen = true,
+            IsVisible = true,
+            MaxPlayers = isPvp ? (byte)20 : (byte)4,
+        };
+
+        // CreateRoom 버튼과 동일하게 CustomRoomProperties 세팅
+        Hashtable customProps = new Hashtable();
+        customProps["MODE"] = isPvp ? "PVP" : "PVE";
+        customProps["MAP"] = GetSelectedMap();
+        roomOptions.CustomRoomProperties = customProps;
+        roomOptions.CustomRoomPropertiesForLobby = new string[] { "MODE", "MAP" };
+
+        PhotonNetwork.CreateRoom(autoRoomName, roomOptions, TypedLobby.Default);
     }
     public override void OnJoinedRoom() //방접속에 성공했다면..
     {
+        pendingJoinRandom = false;
+        Debug.Log($"[JoinedRoom] {PhotonNetwork.CurrentRoom.Name}");
+
         Debug.Log("Enter Room");
         //  CreateTank(); //네트워크 탱크 생성
         //게임 씬으로 이동하는 코루틴 함수 실행
@@ -130,6 +159,16 @@ public class PhotonInit : MonoBehaviourPunCallbacks
         }
 
     }
+    public override void OnJoinRoomFailed(short returnCode, string message)
+    {
+        pendingJoinRandom = false;
+        Debug.LogWarning($"[JoinRoomFailed] {returnCode} / {message}");
+    }
+    public override void OnDisconnected(DisconnectCause cause)
+    {
+        pendingJoinRandom = false;
+        Debug.LogWarning($"[Disconnected] {cause}");
+    }
     //IEnumerator LoadBattleField()
     //{
     //    //씬을 이동하는 동안 포톨클라우드 서버로부터 네트워크 메시지 수신 중단
@@ -144,11 +183,45 @@ public class PhotonInit : MonoBehaviourPunCallbacks
         float pos = Random.Range(-100.0f, 100.0f);
         PhotonNetwork.Instantiate("Tank", new Vector3(pos, 20, pos), Quaternion.identity);
     }*/
-    public void OnClickJoinRandomRoom() //Join Random Room 버튼 연결 함수
+    public void OnClickJoinRandomRoom()
     {
-        PhotonNetwork.NickName = userId.text; //로컬플레이어 이름 설정
-        PlayerPrefs.SetString("USER_ID", userId.text); //플레이어 이름을 저장
-        PhotonNetwork.JoinRandomRoom();//무작위 방 입장
+        Debug.Log($"[JoinRandom Click] state={PhotonNetwork.NetworkClientState} " +
+              $"ready={PhotonNetwork.IsConnectedAndReady} inLobby={PhotonNetwork.InLobby} inRoom={PhotonNetwork.InRoom}");
+
+        PhotonNetwork.NickName = userId.text;
+        PlayerPrefs.SetString("USER_ID", userId.text);
+
+        pendingJoinRandom = true;
+        TryJoinRandom();
+    }
+    void TryJoinRandom()
+    {
+        if (!PhotonNetwork.IsConnectedAndReady)
+        {
+            Debug.LogWarning($"TryJoinRandom() blocked: not ready. state={PhotonNetwork.NetworkClientState}");
+            if (!PhotonNetwork.IsConnected) PhotonNetwork.ConnectUsingSettings();
+            return;
+        }
+
+        if (!PhotonNetwork.InLobby)
+        {
+            bool lobbySent = PhotonNetwork.JoinLobby();
+            Debug.Log($"JoinLobby sent={lobbySent} state={PhotonNetwork.NetworkClientState}");
+            return;
+        }
+
+        bool sent = PhotonNetwork.JoinRandomRoom();
+        Debug.Log($"JoinRandomRoom sent={sent} state={PhotonNetwork.NetworkClientState}");
+
+        // sent=false면 “요청 자체가 서버로 안 나간 것”이라서 콜백도 안 옴
+        if (!sent)
+            Debug.LogWarning("JoinRandomRoom() request NOT sent. (usually still in transition state)");
+    }
+    IEnumerator CoJoinRandomAfterLobby()
+    {
+        yield return new WaitUntil(() => PhotonNetwork.InLobby);
+        Debug.Log($"[JoinRandom AfterLobby] state={PhotonNetwork.NetworkClientState}");
+        PhotonNetwork.JoinRandomRoom();
     }
     public void OnClickCreateRoom() //Make Room 버튼 연결 함수
     {
@@ -246,7 +319,6 @@ public class PhotonInit : MonoBehaviourPunCallbacks
             }   
         }
     }
-
     //RoomItem을 클릭하면 호출되는 함수
     void OnClickRoomItem(string roomName)
     {
@@ -258,5 +330,11 @@ public class PhotonInit : MonoBehaviourPunCallbacks
     {
         GUILayout.Label(PhotonNetwork.NetworkClientState.ToString());
     }
-   
+    public override void OnEnable()
+    {
+        base.OnEnable();
+
+        if (PhotonNetwork.IsConnected && !PhotonNetwork.InLobby)
+            PhotonNetwork.JoinLobby();
+    }
 }

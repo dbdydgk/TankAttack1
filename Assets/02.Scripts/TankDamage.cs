@@ -3,6 +3,9 @@ using System.Collections;
 using System.Runtime.InteropServices.WindowsRuntime;
 using UnityEngine;
 using UnityEngine.UI;
+using ExitGames.Client.Photon;
+using Hashtable = ExitGames.Client.Photon.Hashtable;
+using Photon.Realtime;
 
 public class TankDamage : MonoBehaviourPun
 {
@@ -11,8 +14,8 @@ public class TankDamage : MonoBehaviourPun
     //탱크 폭파 후 투명 처리를 위한 MeshRenderer 컴포넌트 배열
     MeshRenderer[] renderers;
     GameObject expEffect = null; //탱크 폭발 효과
-    public int initHp = 100; //탱크 초기 생명치
-    int currHp = 0; // 현재 체력
+    public float initHp = 100f; //탱크 초기 생명치
+    float currHp = 0f; // 현재 체력
 
     bool isDead = false;    //적 탱크 죽었는지 여부
 
@@ -25,8 +28,11 @@ public class TankDamage : MonoBehaviourPun
     bool rbKinematicBackup;
     //EnemyAI에서 참조할 프로퍼티
     public bool IsDead => isDead;
+    public bool IsAlive => currHp > 0f && !isDead;
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    //플레이어의 적 킬 수를 저장할 때 사용할 키 이름
+    const string KILLS_KEY = "kills";
+
     void Awake()
     {
         renderers = GetComponentsInChildren<MeshRenderer>();
@@ -41,6 +47,22 @@ public class TankDamage : MonoBehaviourPun
         {
             rbConstraintsBackup = rb.constraints;
             rbKinematicBackup = rb.isKinematic;
+        }
+    }
+    // 로컬 플레이어는 게임 시작 시 킬 0으로 초기화(한 번만)
+    void Start()
+    {
+        if (!PhotonNetwork.InRoom) return;
+        if (!photonView.IsMine) return;
+
+        // 적(Enemy)이 마스터 소유로 스폰되면 여기 들어와서 kills 리셋되는 문제 방지
+        if (!CompareTag("Player")) return;
+
+        // 매번 0으로 덮어쓰지 말고, 처음 한 번만 세팅
+        if (!PhotonNetwork.LocalPlayer.CustomProperties.ContainsKey(KILLS_KEY))
+        {
+            var ht = new ExitGames.Client.Photon.Hashtable { { KILLS_KEY, 0 } };
+            PhotonNetwork.LocalPlayer.SetCustomProperties(ht);
         }
     }
     void SetDeadState(bool dead)
@@ -76,7 +98,7 @@ public class TankDamage : MonoBehaviourPun
         }
     }
     // EnemyBullet에서 직접 호출할 수 있도록 공개 함수로 분리
-    public void TakeDamage(int amount)
+    public void TakeDamage(float amount)
     {
         if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
@@ -100,12 +122,12 @@ public class TankDamage : MonoBehaviourPun
         ApplyDamageAsMaster(amount);
     }
     [PunRPC]
-    void RpcRequestDamage(int amount, PhotonMessageInfo info)
+    void RpcRequestDamage(float amount, PhotonMessageInfo info)
     {
         if (!PhotonNetwork.IsMasterClient) return;
         ApplyDamageAsMaster(amount);
     }
-    void ApplyDamageAsMaster(int amount)
+    void ApplyDamageAsMaster(float amount)
     {
         if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
@@ -122,6 +144,61 @@ public class TankDamage : MonoBehaviourPun
             photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);
             StartCoroutine(ExplosionTankOwner()); // 너 기존 로직 유지
         }
+    }
+    // 기존 ApplyDamageAsMaster를 “공격자”까지 받게 오버로드/수정
+    void ApplyDamageAsMaster(float amount, int attackerActor)
+    {
+        if (amount <= 0) return;
+        if (currHp <= 0 || isDead) return;
+
+        currHp -= amount;
+        if (currHp < 0) currHp = 0;
+
+        photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
+
+        if (currHp <= 0 && !isDead)
+        {
+            isDead = true;
+
+            // ★ 킬/팀킬 처리 (PVE만)
+            HandleKillScore(attackerActor);
+
+            photonView.RPC(nameof(RpcDeathVisual), RpcTarget.All);
+            StartCoroutine(ExplosionTankOwner());
+        }
+    }
+    void HandleKillScore(int attackerActor)
+    {
+        if (!IsPveKillCounting()) return;
+        if (attackerActor < 0) return;
+
+        // 적이 죽었으면: attacker +1
+        if (CompareTag("Enemy"))
+        {
+            AddKills(attackerActor, +1);
+            return;
+        }
+
+        // 플레이어가 죽었으면(팀킬 패널티): attacker -5 (자살은 제외)
+        if (CompareTag("Player"))
+        {
+            int victimActor = photonView.OwnerActorNr;
+            if (attackerActor != victimActor)
+                AddKills(attackerActor, -5);
+        }
+    }
+
+    void AddKills(int actorNumber, int delta)
+    {
+        Player p = PhotonNetwork.CurrentRoom?.GetPlayer(actorNumber);
+        if (p == null) return;
+
+        int cur = 0;
+        if (p.CustomProperties != null && p.CustomProperties.ContainsKey(KILLS_KEY))
+            cur = (int)p.CustomProperties[KILLS_KEY];
+
+        var ht = new Hashtable { { KILLS_KEY, cur + delta } };
+        p.SetCustomProperties(ht);
     }
     IEnumerator ExplosionTankOwner()
     {
@@ -142,7 +219,6 @@ public class TankDamage : MonoBehaviourPun
 
         // 부활(소유자만 HP 리셋) + 전원 동기화
         currHp = initHp;
-        isDead = false;
 
         photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp); // 이 안에서 HUD/렌더러도 복구됨
     }
@@ -150,32 +226,22 @@ public class TankDamage : MonoBehaviourPun
     private void OnTriggerEnter(Collider other)
     {
         if (currHp <= 0) return;
+        if (!other.CompareTag("CANNON")) return;
 
-        if (currHp > 0 && other.tag == "CANNON")
+        // ★ 마스터만 데미지/킬 판정 (중복 데미지 방지)
+        if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient) return;
+
+        float damage = 20;
+        int attackerActor = -1;
+
+        Cannon cn = other.GetComponent<Cannon>();
+        if (cn != null)
         {
-            int damage = 20;
-            Cannon cn = other.GetComponent<Cannon>();
-            if(cn != null)
-            {
-                damage = cn.damage;
-            }
-            
-            TakeDamage(damage);
-
-            //TakeDamage함수에서 모두 처리하여 주석처리 함
-            ////현재 생명치 백분율 계산
-            //hpBar.fillAmount = (float)currHp / (float)initHp;
-            ////40%이하는 빨간색, 60% 이하는 노란색
-            //if(hpBar.fillAmount <= 0.4f) 
-            //    hpBar.color = Color.red;
-            //else if(hpBar.fillAmount <=0.6f)
-            //    hpBar.color = Color.yellow;
-
-            //if (currHp <= 0)
-            //{
-            //    StartCoroutine(ExplosionTank());
-            //}
+            damage = cn.damage;
+            attackerActor = cn.ownerActorNumber;  // FireCannon에서 넣어둔 값
         }
+
+        ApplyDamageAsMaster(damage, attackerActor);
     }
     //플레이어 죽음과 적 탱크 죽음 따로 나누는 ExplosionTank 함수 새로 작성함.
     //IEnumerator ExplosionTank()
@@ -241,7 +307,7 @@ public class TankDamage : MonoBehaviourPun
     {
         
     }
-    public void Heal(int amount)
+    public void Heal(float amount)
     {
         if (amount <= 0) return;
         if (currHp <= 0 || isDead) return;
@@ -260,25 +326,26 @@ public class TankDamage : MonoBehaviourPun
         ApplyHealAsMaster(amount);
     }
     [PunRPC]
-    void RpcRequestHeal(int amount)
+    void RpcRequestHeal(float amount)
     {
         if (!PhotonNetwork.IsMasterClient) return;
         ApplyHealAsMaster(amount);
     }
 
-    void ApplyHealAsMaster(int amount)
+    void ApplyHealAsMaster(float amount)
     {
         currHp = Mathf.Clamp(currHp + amount, 0, initHp);
         photonView.RPC(nameof(RpcSyncHp), RpcTarget.All, currHp);
     }
     [PunRPC]
-    void RpcSyncHp(int newHp)
+    void RpcSyncHp(float newHp)
     {
         currHp = newHp;
         ApplyHpUI();
 
         // HP가 다시 생기면(부활) 원격에서도 보이게 복구
-        if (currHp > 0 && isDead)
+        //부활 조건 완화 => 체력 UI가 꺼져있는 오브젝트도 부활 조건에 포함
+        if (currHp > 0f && (isDead || (hudCanvas != null && !hudCanvas.enabled)))
         {
             isDead = false;
             if (hudCanvas != null) hudCanvas.enabled = true;
@@ -324,5 +391,16 @@ public class TankDamage : MonoBehaviourPun
     {
         if (renderers == null) return;
         foreach (var r in renderers) r.enabled = isVisible;
+    }
+
+    // PVE에서만 킬 집계한다고 했으니, GameMgr에서 모드값을 꺼내 쓰면 됨.
+    bool IsPveKillCounting()
+    {
+        if (!PhotonNetwork.InRoom) return false;
+
+        GameMgr gm = FindObjectOfType<GameMgr>();
+        if (gm == null) return false;
+
+        return !gm.isPvpMode; // PVE일 때만 true
     }
 }
