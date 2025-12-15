@@ -273,50 +273,73 @@ if (PhotonNetwork.IsMasterClient && PhotonNetwork.InRoom && PhotonNetwork.Curren
     // =========================
     //  PVE: 웨이브 & 적 스폰
     // =========================
+    void StartNextWave()
+    {
+        if (!PhotonNetwork.IsMasterClient) return;
+        if (currentWave >= maxWave) return;   // 추가: 여기 중요
+
+        currentWave++;
+
+        if (pv != null)
+            pv.RPC(nameof(RpcSetWave), RpcTarget.AllBuffered, currentWave, maxWave);
+
+        SpawnWave(currentWave);
+    }
     System.Collections.IEnumerator WaveRoutine()
     {
-        int t = Mathf.CeilToInt(timeBeforeFirstWave);
-        while (t > 0)
-        {
-            //if (pv != null)
-            //    pv.RPC("LogMsg", RpcTarget.AllBuffered, $"[PVE] Starting in {t}...");
-            //yield return new WaitForSeconds(1f);
-            //t--;
-            // 로그 대신 상단 상태 텍스트로 표시
-            if (txtWave != null)
-                txtWave.text = $"[PVE] Starting in {t}...";
+        if (!PhotonNetwork.IsMasterClient) yield break;
 
-            yield return new WaitForSeconds(1f);
-            t--;
+        // (A) 첫 웨이브 시작 전(아직 0웨이브)일 때만 카운트다운
+        if (currentWave == 0 && !AreEnemiesAlive())
+        {
+            int t = Mathf.CeilToInt(timeBeforeFirstWave);
+            while (t > 0)
+            {
+                if (txtWave != null)
+                    txtWave.text = $"[PVE] Starting in {t}...";
+
+                yield return new WaitForSeconds(1f);
+                t--;
+            }
+
+            StartNextWave(); // 여기서만 0->1 증가
         }
-        while (currentWave < maxWave)
+
+        // (B) 이후 루프: 현재 웨이브가 끝날 때까지 기다렸다가 다음 웨이브 시작
+        while (true)
         {
-            currentWave++;
-
-            // 다른 클라 UI도 같이 갱신되게 (RpcSetWave 함수는 이미 있음) :contentReference[oaicite:9]{index=9}
-            if (pv != null)
-                pv.RPC(nameof(RpcSetWave), RpcTarget.AllBuffered, currentWave, maxWave);
-
-            SpawnWave(currentWave);
-
             // 적이 살아있는 동안 계속 체크
             while (AreEnemiesAlive())
             {
-                // 5웨이브 이전에 모두 죽으면 실패 엔딩
                 if (!AreAnyPlayersAlive())
                 {
                     EndGameToEnding(false);
                     yield break;
                 }
+
+                // 도중에 마스터 권한을 잃었으면 즉시 종료(중복 진행 방지)
+                if (!PhotonNetwork.IsMasterClient) yield break;
+
                 yield return null;
             }
 
+            // 적이 더 이상 없다 = 웨이브 종료 상태
+            if (currentWave >= maxWave)
+                break;
+
+            // 웨이브 간 대기
             yield return new WaitForSeconds(timeBetweenWaves);
+
+            // 대기 중 마스터가 바뀌었으면 종료
+            if (!PhotonNetwork.IsMasterClient) yield break;
+
+            StartNextWave();
         }
 
-        // 5웨이브 끝났을 때, 한 명이라도 살아있으면 클리어
+        // 여기까지 왔으면 maxWave까지 끝난 상태
         EndGameToEnding(AreAnyPlayersAlive());
     }
+
     void UpdateWaveUI()
     {
         if (isPvpMode) return;
