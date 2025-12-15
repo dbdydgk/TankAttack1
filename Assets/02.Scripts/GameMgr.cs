@@ -3,6 +3,8 @@ using Photon.Realtime;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using ExitGames.Client.Photon;
+using Hashtable = ExitGames.Client.Photon.Hashtable;
 
 public class GameMgr : MonoBehaviourPunCallbacks
 {
@@ -51,6 +53,14 @@ public class GameMgr : MonoBehaviourPunCallbacks
     public bool isPvpMode = false;  //현재 방의 모드(PVP인지 아닌지)
 
     int currentWave = 0;
+
+    [Header("PVE Start Button")]
+    public Button btnStart; // Canvas에 만든 START 버튼 연결
+
+    const string ROOMPROP_PVE_STARTED = "PVE_STARTED";
+    bool pveStarted = false;
+    Coroutine waveCo;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Awake()
     {
@@ -84,10 +94,100 @@ public class GameMgr : MonoBehaviourPunCallbacks
         string msg = "\n<color=#00ff00>[" + PhotonNetwork.NickName + "] Connected</color>";
         pv.RPC("LogMsg", RpcTarget.AllBuffered, msg);
 
-        if (!isPvpMode && PhotonNetwork.IsMasterClient)
-            StartCoroutine(WaveRoutine());
+        //if (!isPvpMode && PhotonNetwork.IsMasterClient)
+        //    StartCoroutine(WaveRoutine());
+
+        RefreshStartButtonUI();
+
+        // 만약 “이미 시작된 방”에 늦게 들어온 경우: 마스터만 웨이브 코루틴 켜주기
+        if (!isPvpMode && PhotonNetwork.IsMasterClient && GetRoomBool(ROOMPROP_PVE_STARTED))
+        {
+            if (waveCo == null)
+                waveCo = StartCoroutine(WaveRoutine());
+        }
+    }
+    // START 버튼에 연결할 함수
+    public void OnClickStartPve()
+    {
+        if (isPvpMode) return;
+        if (!PhotonNetwork.IsMasterClient) return;
+
+        if (GetRoomBool(ROOMPROP_PVE_STARTED))
+            return; // 중복 방지
+
+        SetRoomBool(ROOMPROP_PVE_STARTED, true);
+
+        // 모두 버튼 숨김 (늦게 들어온 사람도 적용되게 AllBuffered)
+        pv.RPC(nameof(RpcPveStarted), RpcTarget.AllBuffered);
+
+        // 웨이브는 마스터만 시작
+        if (waveCo == null)
+            waveCo = StartCoroutine(WaveRoutine());
+    }
+    [PunRPC]
+    void RpcPveStarted()
+    {
+        pveStarted = true;
+        if (btnStart != null)
+            btnStart.gameObject.SetActive(false);
     }
 
+    public override void OnMasterClientSwitched(Player newMasterClient)
+    {
+        // 방장이 바뀌면 START 버튼 interactable 갱신
+        RefreshStartButtonUI();
+
+        // 시작된 방이면 새 방장이 웨이브 코루틴을 이어서 담당
+        if (!isPvpMode && PhotonNetwork.IsMasterClient && GetRoomBool(ROOMPROP_PVE_STARTED))
+        {
+            if (waveCo == null)
+                waveCo = StartCoroutine(WaveRoutine());
+        }
+    }
+    bool GetRoomBool(string key)
+    {
+        if (PhotonNetwork.CurrentRoom == null) return false;
+        if (PhotonNetwork.CurrentRoom.CustomProperties == null) return false;
+
+        if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(key, out object v) && v is bool b)
+            return b;
+
+        return false;
+    }
+    void SetRoomBool(string key, bool value)
+    {
+        if (PhotonNetwork.CurrentRoom == null) return;
+        var ht = new Hashtable { { key, value } };
+        PhotonNetwork.CurrentRoom.SetCustomProperties(ht);
+    }
+    void RefreshStartButtonUI()
+    {
+        if (btnStart == null) return;
+
+        // PVP면 아예 숨김
+        if (isPvpMode)
+        {
+            btnStart.gameObject.SetActive(false);
+            return;
+        }
+
+        pveStarted = GetRoomBool(ROOMPROP_PVE_STARTED);
+
+        if (pveStarted)
+        {
+            btnStart.gameObject.SetActive(false);
+            if (txtWave != null && currentWave == 0)
+                txtWave.text = $"Wave {currentWave}/{maxWave}";
+            return;
+        }
+
+        // PVE 대기 상태: 버튼은 보이되, 방장만 누를 수 있게
+        btnStart.gameObject.SetActive(true);
+        btnStart.interactable = PhotonNetwork.IsMasterClient;
+
+        if (txtWave != null)
+            txtWave.text = "Waiting... (Host press START)";
+    }
     // =========================
     //  PVE: 웨이브 & 적 스폰
     // =========================
@@ -196,8 +296,12 @@ public class GameMgr : MonoBehaviourPunCallbacks
     void GetConnectPlayerCount() //룸 접속자 수 표시 함수
     {
         Room currRoom = PhotonNetwork.CurrentRoom;
-        txtConnect.text = currRoom.PlayerCount.ToString()+
-            "/"+currRoom.MaxPlayers.ToString();
+
+        if (currRoom == null || txtConnect == null) return;
+
+        int displayMax = isPvpMode ? currRoom.MaxPlayers : 4;   // PVE는 4로 고정 표시
+
+        txtConnect.text = $"{currRoom.PlayerCount}/{displayMax}";
     }
     public override void OnPlayerEnteredRoom(Player newPlayer) //새로운 플레이어가 룸에 접속했을 때
     {
@@ -330,5 +434,22 @@ public class GameMgr : MonoBehaviourPunCallbacks
             return true;
         }
         return false;
+    }
+    //PVE 시작 상태(Room Property) 변경을 모든 클라가 즉시 반영하도록
+    public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
+    {
+        if (propertiesThatChanged == null) return;
+
+        if (propertiesThatChanged.ContainsKey(ROOMPROP_PVE_STARTED))
+        {
+            RefreshStartButtonUI();
+
+            // 시작된 방인데 방장이면 웨이브 담당
+            if (!isPvpMode && PhotonNetwork.IsMasterClient && GetRoomBool(ROOMPROP_PVE_STARTED))
+            {
+                if (waveCo == null)
+                    waveCo = StartCoroutine(WaveRoutine());
+            }
+        }
     }
 }

@@ -4,7 +4,6 @@ using UnityEngine;
 using UnityEngine.UI;
 using Photon.Pun;
 using Photon.Realtime;
-using UnityEditor;
 //커스텀 룸 속성을 다루기 위한 라이브러리
 //방의 모드를 Photon을 통해 네트워크로 보내 주고
 //다른 클라이언트에서도 똑같이 읽을 수 있도록 하기 위해 사용
@@ -171,7 +170,7 @@ public class PhotonInit : MonoBehaviourPunCallbacks
         RoomOptions roomOptions = new RoomOptions();
         roomOptions.IsOpen = true;
         roomOptions.IsVisible = true;
-        roomOptions.MaxPlayers = 20;
+        roomOptions.MaxPlayers = isPvp ? (byte)20 : (byte)4;
 
         //커스텀 룸 속성에 모드 정보 저장
         Hashtable customProps = new Hashtable();
